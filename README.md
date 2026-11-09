@@ -67,6 +67,17 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 - `db.mjs`, `colombia.mjs`, `helpers.mjs` — esquema SQLite, datos de Colombia (ciudades, 20 localidades de Bogotá), utilidades.
 - `public/` — interfaz (HTML/CSS/JS sin build, rutas con `#`). `demo.mjs`, `test.mjs`.
 
+## Desplegar (Render)
+
+1. Crea una cuenta en [render.com](https://render.com) y conecta tu GitHub (da acceso al repositorio `atria`).
+2. **New → Blueprint** y elige el repositorio: Render lee `render.yaml` y crea el servicio con su disco persistente (plan Starter, de pago: el disco guarda la base SQLite).
+3. Cuando lo pida, llena las variables: `BASE_URL` (la URL de Render o tu dominio), `ADMIN_EMAILS` (tu correo), `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, y las de Wompi cuando las tengas.
+4. Abre la URL, crea tu cuenta con el correo de `ADMIN_EMAILS` y ya eres administrador.
+5. Dominio propio: Render → Settings → Custom Domains (el HTTPS es automático). Actualiza `BASE_URL`.
+6. Wompi: en su panel pon la URL de eventos `BASE_URL/api/wompi/eventos`.
+
+Railway y Fly.io también sirven (necesitan un volumen persistente y `TRUST_PROXY=1`). **No uses hosting estático** (Netlify, Vercel…): Artia necesita un servidor Node.
+
 ## Supabase
 
 Proyecto conectado y esquema creado (`supabase/schema.sql`: 11 tablas con RLS activado y sin políticas, y el bucket privado `documentos-verificacion`).

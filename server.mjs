@@ -39,6 +39,8 @@ export function configDesdeEnv(env = process.env) {
       ? { publicKey: env.WOMPI_PUBLIC_KEY, integritySecret: env.WOMPI_INTEGRITY_SECRET, eventsSecret: env.WOMPI_EVENTS_SECRET ?? '' }
       : null,
     pagosSimulados: env.PAGOS_SIMULADOS === '1' && !produccion,
+    // Detrás de un proxy (Render, Railway, Fly…) la IP real viene en X-Forwarded-For.
+    confiarProxy: env.TRUST_PROXY === '1',
     adminEmails: (env.ADMIN_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
   };
 }
@@ -149,6 +151,8 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     db, q, ruta, config, fetchFn, almacen, SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
     exigir, exigirAdmin, exigirSuscripcion, exigirMentorActivo, perfilEstudianteFalta, resumenResenas,
   };
+
+  ruta('GET', '/api/salud', () => ({ ok: true }));
 
   ruta('GET', '/api/catalogo', () => ({
     ciudades: CIUDADES, materias: MATERIAS, categorias: CATEGORIAS, niveles: NIVELES, localidades: LOCALIDADES_BOGOTA,
@@ -393,7 +397,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   return async function manejar(req, res) {
     try {
       const url = new URL(req.url, 'http://localhost');
-      const ip = req.socket.remoteAddress ?? '?';
+      const ip = (config.confiarProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) || req.socket.remoteAddress || '?';
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Referrer-Policy', 'same-origin');
       res.setHeader('X-Frame-Options', 'DENY');

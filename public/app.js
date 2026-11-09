@@ -26,7 +26,8 @@ const estrellas = (p) => (p == null ? '' : html`<span class="estrellas" role="im
 const insignia = (c) => (c.verificado ? html`<span class="verif" title="Identidad y título revisados por Artia">✓ Verificado</span>` : '');
 
 let yo = null;
-let catalogo = { ciudades: [], materias: [], niveles: [], localidades: [], colegioTipos: {}, grados: [], dias: [] };
+let catalogo = { ciudades: [], materias: [], categorias: [], niveles: [], localidades: [], colegioTipos: {}, grados: [], dias: [] };
+const ICONOS = { 'Idiomas': '🗣️', 'Ciencias y números': '🧮', 'Humanidades': '📖', 'Bienestar y espiritualidad': '🧘', 'Arte y creatividad': '🎨', 'Deportes': '🎾', 'Tecnología': '🤖' };
 
 async function api(metodo, ruta, cuerpo) {
   const r = await fetch(ruta, {
@@ -45,6 +46,10 @@ function avisar(msg) {
 }
 const opciones = (lista, actual = '', vacio) =>
   html`${vacio ? html`<option value="">${vacio}</option>` : ''}${lista.map((x) => html`<option ${sel(x === actual)}>${x}</option>`)}`;
+/** <option>s de materias agrupadas por categoría. */
+const opcionesMaterias = (actual = '', vacio) =>
+  html`${vacio ? html`<option value="">${vacio}</option>` : ''}${catalogo.categorias.map((c) =>
+    html`<optgroup label="${c.nombre}">${c.materias.map((m) => html`<option ${sel(m === actual)}>${m}</option>`)}</optgroup>`)}`;
 const optMod = (actual) => html`${Object.entries(MOD).map(([k, v]) => html`<option value="${k}" ${sel(k === actual)}>${v}</option>`)}`;
 const datosForm = (f) => Object.fromEntries(new FormData(f));
 const fallo = (e) => html`<p class="error" role="alert">${e.message}</p>`;
@@ -75,6 +80,8 @@ function pintar(r, { aviso = true } = {}) { $app.innerHTML = (aviso ? avisosCuen
 // ---------- navegación ----------
 function pintarNav() {
   const enlaces = [['#/clases', 'Buscar clases']];
+  const pendientes = yo ? yo.pasos.filter((p) => !p.ok).length : 0;
+  if (pendientes) enlaces.unshift(['#/empezar', `Primeros pasos (${yo.pasos.length - pendientes}/${yo.pasos.length})`]);
   if (yo?.rol === 'profesor') enlaces.push(['#/mis-clases', 'Mis clases'], ['#/horarios', 'Horarios'], ['#/agenda', 'Agenda'], ['#/solicitudes', 'Solicitudes']);
   if (yo?.rol === 'estudiante') enlaces.push(['#/agenda', 'Mi agenda'], ['#/solicitudes', 'Lo que busco']);
   if (yo?.es_admin) enlaces.push(['#/admin', 'Administración']);
@@ -117,24 +124,51 @@ async function vistaInicio() {
           : html`<a class="btn sec" href="#/registro?rol=profesor">Conviértete en mentor</a>`}
       </div>
     </section>
-    <h2>Clases destacadas</h2>
+    <h2>Explora por categoría</h2>
+    <div class="categorias">${catalogo.categorias.map((c) => html`<a class="categoria" href="#/clases?categoria=${encodeURIComponent(c.nombre)}"><span class="icono" aria-hidden="true">${ICONOS[c.nombre] ?? '✨'}</span><b>${c.nombre}</b><span class="suave">${c.materias.slice(0, 3).join(', ')}${c.materias.length > 3 ? '…' : ''}</span></a>`)}</div>
+    <h2 style="margin-top:2rem">Clases destacadas</h2>
     ${clases.length ? html`<div class="rejilla">${clases.slice(0, 6).map(tarjetaClase)}</div>` : html`<p class="vacio">Aún no hay clases publicadas. ¡Sé el primero!</p>`}`);
 }
 
 async function vistaClases(params) {
   const f = Object.fromEntries(params);
-  const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
-  const { clases } = await api('GET', '/api/clases' + (qs ? '?' + qs : ''));
+  const activos = Object.entries(f).filter(([, v]) => v);
+  const { clases } = await api('GET', '/api/clases' + (activos.length ? '?' + new URLSearchParams(activos) : ''));
+  const url = (cambios) => '#/clases?' + new URLSearchParams(Object.entries({ ...f, ...cambios }).filter(([, v]) => v));
+  const delCategoria = f.categoria ? catalogo.categorias.find((c) => c.nombre === f.categoria)?.materias ?? [] : null;
+  const nFiltros = ['materia', 'ciudad', 'modalidad', 'max', 'calificacion_min', 'q'].filter((k) => f[k]).length;
   pintar(html`
-    <h1>Buscar clases</h1>
-    <form class="filtros" data-form="buscar" role="search">
-      <input name="q" placeholder="¿Qué quieres aprender?" value="${f.q ?? ''}" aria-label="Buscar">
-      <select name="materia" aria-label="Materia">${opciones(catalogo.materias, f.materia, 'Todas las materias')}</select>
-      <select name="ciudad" aria-label="Ciudad">${opciones(catalogo.ciudades, f.ciudad, 'Toda Colombia')}</select>
-      <select name="modalidad" aria-label="Modalidad"><option value="">Cualquier modalidad</option>${optMod(f.modalidad)}</select>
-      <input name="max" type="number" min="0" step="1000" placeholder="Precio máx. por hora (COP)" value="${f.max ?? ''}" aria-label="Precio máximo">
-      <button class="btn">Buscar</button>
-    </form>
+    <h1>Marketplace de clases</h1>
+    <div class="chips" role="group" aria-label="Categorías">
+      <a class="chip ${f.categoria ? '' : 'activa'}" href="${url({ categoria: '', materia: '' })}">Todas</a>
+      ${catalogo.categorias.map((c) => html`<a class="chip ${f.categoria === c.nombre ? 'activa' : ''}" href="${url({ categoria: c.nombre, materia: '' })}"><span aria-hidden="true">${ICONOS[c.nombre] ?? ''}</span> ${c.nombre}</a>`)}
+    </div>
+    ${delCategoria ? html`<div class="chips sub" role="group" aria-label="Materias">
+      ${delCategoria.map((m) => html`<a class="chip chica ${f.materia === m ? 'activa' : ''}" href="${url({ materia: f.materia === m ? '' : m })}">${m}</a>`)}
+    </div>` : ''}
+    <details class="filtros-caja" ${window.innerWidth >= 720 || nFiltros ? new Raw('open') : ''}>
+      <summary>Filtros${nFiltros ? ` (${nFiltros})` : ''}</summary>
+      <form class="filtros" data-form="buscar" role="search">
+        <input type="hidden" name="categoria" value="${f.categoria ?? ''}">
+        <input name="q" placeholder="¿Qué quieres aprender?" value="${f.q ?? ''}" aria-label="Buscar">
+        <select name="materia" aria-label="Materia">${f.categoria ? opciones(delCategoria, f.materia, 'Todas las materias') : opcionesMaterias(f.materia, 'Todas las materias')}</select>
+        <select name="ciudad" aria-label="Ciudad">${opciones(catalogo.ciudades, f.ciudad, 'Toda Colombia')}</select>
+        <select name="modalidad" aria-label="Modalidad"><option value="">Cualquier modalidad</option>${optMod(f.modalidad)}</select>
+        <input name="max" type="number" min="0" step="1000" placeholder="Precio máx. por hora (COP)" value="${f.max ?? ''}" aria-label="Precio máximo por hora">
+        <select name="calificacion_min" aria-label="Calificación mínima">
+          <option value="">Cualquier calificación</option>
+          ${[4, 3].map((n) => html`<option value="${n}" ${sel(f.calificacion_min === String(n))}>${'★'.repeat(n)} o más</option>`)}
+        </select>
+        <select name="orden" aria-label="Ordenar por">
+          <option value="">Mejor calificadas</option>
+          <option value="precio_asc" ${sel(f.orden === 'precio_asc')}>Precio: menor a mayor</option>
+          <option value="precio_desc" ${sel(f.orden === 'precio_desc')}>Precio: mayor a menor</option>
+          <option value="recientes" ${sel(f.orden === 'recientes')}>Más recientes</option>
+        </select>
+        <button class="btn">Aplicar filtros</button>
+      </form>
+    </details>
+    <p class="suave resultados" aria-live="polite">${clases.length} ${clases.length === 1 ? 'clase encontrada' : 'clases encontradas'}${activos.length ? html` · <a href="#/clases">Limpiar filtros</a>` : ''}</p>
     ${clases.length ? html`<div class="rejilla">${clases.map(tarjetaClase)}</div>` : html`<p class="vacio">No encontramos clases con esos filtros. Prueba con otros o <a href="#/solicitudes">publica lo que buscas</a>.</p>`}`);
 }
 
@@ -377,7 +411,7 @@ async function vistaMisClases(editarId) {
       <div id="error"></div>
       <label>Título<input name="titulo" required maxlength="100" value="${c.titulo ?? ''}" placeholder="Ej. Refuerzo de matemáticas para bachillerato"></label>
       <div class="fila">
-        <label>Materia<select name="materia" required>${opciones(catalogo.materias, c.materia, 'Selecciona')}</select></label>
+        <label>Materia<select name="materia" required>${opcionesMaterias(c.materia, 'Selecciona')}</select></label>
         <label>Nivel<select name="nivel">${opciones(catalogo.niveles, c.nivel, 'Todos los niveles')}</select></label>
       </div>
       <label>Descripción<textarea name="descripcion" maxlength="1000">${c.descripcion ?? ''}</textarea></label>
@@ -453,7 +487,7 @@ async function vistaSolicitudes() {
       <h2>Publicar una solicitud</h2>
       <div id="error"></div>
       <div class="fila">
-        <label>¿Qué quieres aprender?<select name="materia" required>${opciones(catalogo.materias, '', 'Selecciona')}</select></label>
+        <label>¿Qué quieres aprender?<select name="materia" required>${opcionesMaterias('', 'Selecciona')}</select></label>
         <label>Presupuesto por hora (COP, 0 = a convenir)<input name="presupuesto" type="number" min="0" step="1000" value="0"></label>
       </div>
       <label>Detalles<textarea name="descripcion" maxlength="800" placeholder="Tu nivel, tus metas, horarios disponibles…"></textarea></label>
@@ -547,12 +581,34 @@ async function vistaAdmin(estado = 'pendiente') {
       </article>`) : html`<p class="vacio">No hay mentores en este estado.</p>`}`, { aviso: false });
 }
 
+// ---------- primeros pasos ----------
+async function vistaEmpezar() {
+  const pasos = yo.pasos;
+  const hechos = pasos.filter((p) => p.ok).length;
+  const siguiente = pasos.find((p) => !p.ok);
+  pintar(html`
+    <div class="empezar">
+      <h1>${hechos === pasos.length ? '¡Todo listo!' : `Bienvenid@, ${yo.nombre.split(' ')[0]}`}</h1>
+      <p class="suave">${yo.rol === 'profesor' ? 'Sigue estos pasos para publicar tus clases y recibir estudiantes.' : 'Sigue estos pasos para reservar tu primera clase en minutos.'}</p>
+      <div class="progreso" role="progressbar" aria-valuemin="0" aria-valuemax="${pasos.length}" aria-valuenow="${hechos}"><span style="width:${Math.round((hechos / pasos.length) * 100)}%"></span></div>
+      <p class="suave">${hechos} de ${pasos.length} pasos completados</p>
+      <ol class="pasos">
+        ${pasos.map((p, i) => html`<li class="${p.ok ? 'hecho' : p === siguiente ? 'actual' : ''}">
+          <span class="num" aria-hidden="true">${p.ok ? '✓' : i + 1}</span>
+          <div><b>${p.texto}</b>${p.nota ? html` <span class="etiqueta espera">${p.nota}</span>` : ''}</div>
+          ${p.ok ? html`<span class="etiqueta ok">Listo</span>` : html`<a class="btn ${p === siguiente ? '' : 'sec'} chico" href="${p.enlace}">${p === siguiente ? 'Empezar' : 'Ir'}</a>`}
+        </li>`)}
+      </ol>
+      ${hechos === pasos.length ? html`<p><a class="btn morado" href="${yo.rol === 'profesor' ? '#/agenda' : '#/clases'}">${yo.rol === 'profesor' ? 'Ver mi agenda' : 'Buscar clases'}</a></p>` : ''}
+    </div>`, { aviso: false });
+}
+
 // ---------- enrutador ----------
 async function enrutar() {
   const [rutaTxt, qs] = (location.hash.slice(1) || '/').split('?');
   const params = new URLSearchParams(qs ?? '');
   const [, base, arg] = rutaTxt.split('/');
-  const protegidas = ['perfil', 'suscripcion', 'verificacion', 'mis-clases', 'horarios', 'agenda', 'solicitudes', 'reservas', 'admin'];
+  const protegidas = ['empezar', 'perfil', 'suscripcion', 'verificacion', 'mis-clases', 'horarios', 'agenda', 'solicitudes', 'reservas', 'admin'];
   try {
     if (protegidas.includes(base) && !yo) { location.hash = '#/ingresar'; return; }
     if (['mis-clases', 'horarios', 'verificacion'].includes(base) && yo.rol !== 'profesor') { location.hash = '#/'; return; }
@@ -565,6 +621,7 @@ async function enrutar() {
       case 'profesor': await vistaProfesor(arg); break;
       case 'ingresar': vistaAcceso('ingresar', params); break;
       case 'registro': vistaAcceso('registro', params); break;
+      case 'empezar': await vistaEmpezar(); break;
       case 'perfil': vistaPerfil(); break;
       case 'suscripcion': await vistaSuscripcion(params); break;
       case 'verificacion': await vistaVerificacion(); break;
@@ -601,13 +658,13 @@ document.addEventListener('submit', async (ev) => {
       case 'registro': case 'ingresar': {
         const reg = f.dataset.form === 'registro';
         ({ usuario: yo } = await api('POST', reg ? '/api/registro' : '/api/login', { ...d, es_menor: 'es_menor' in d }));
-        avisar(reg ? '¡Cuenta creada! Completa tu perfil.' : `¡Hola de nuevo, ${yo.nombre.split(' ')[0]}!`);
-        location.hash = reg ? '#/perfil' : yo.rol === 'profesor' ? '#/agenda' : '#/clases';
+        avisar(reg ? '¡Cuenta creada! Sigue los primeros pasos.' : `¡Hola de nuevo, ${yo.nombre.split(' ')[0]}!`);
+        location.hash = reg || yo.pasos.some((p) => !p.ok) ? '#/empezar' : yo.rol === 'profesor' ? '#/agenda' : '#/clases';
         break;
       }
       case 'perfil':
         ({ usuario: yo } = await api('PUT', '/api/perfil', { ...d, es_menor: 'es_menor' in d }));
-        avisar('Perfil guardado'); await enrutar(); break;
+        avisar('Perfil guardado'); pintarNav(); await enrutar(); break;
       case 'documento':
         await api('PUT', '/api/perfil', { nombre: yo.nombre, ciudad: yo.ciudad, telefono: yo.telefono, bio: yo.bio, materias: yo.materias, tarifa: yo.tarifa, modalidad: yo.modalidad, experiencia: yo.experiencia, documento: d.documento });
         await refrescarYo(); avisar('Cédula guardada'); await enrutar(); break;
@@ -659,6 +716,7 @@ document.addEventListener('click', async (ev) => {
   const b = ev.target.closest('[data-accion]');
   if (!b) return;
   const { accion, id, estado, dia, i } = b.dataset;
+  if (accion === 'menu') { const abierto = $nav.classList.toggle('abierto'); b.setAttribute('aria-expanded', abierto); return; }
   try {
     if (accion === 'salir') { await api('POST', '/api/logout'); yo = null; location.hash = '#/'; pintarNav(); avisar('Sesión cerrada'); return; }
     if (accion === 'borrar-clase' && confirm('¿Eliminar esta clase?')) { await api('DELETE', `/api/clases/${id}`); await enrutar(); }
@@ -687,6 +745,7 @@ document.addEventListener('click', async (ev) => {
 });
 
 window.addEventListener('hashchange', async () => {
+  $nav.classList.remove('abierto'); document.getElementById('menu-btn')?.setAttribute('aria-expanded', 'false');
   if (yo) { try { await refrescarYo(); } catch { /* sin sesión */ } }
   enrutar();
 });

@@ -4,12 +4,14 @@ Plataforma en español para conectar **mentores** (profesores) y **estudiantes**
 
 ## Qué hace
 
-**Acceso:** ingreso y registro separados por rol («Soy estudiante» / «Soy mentor»).
+**Acceso:** ingreso y registro separados por rol («Soy estudiante» / «Soy mentor»), con una guía de **primeros pasos** (perfil → suscripción → primera reserva / verificación → clase → horarios). Funciona en computador y en el celular (menú móvil, instalable como app desde el navegador).
+
+**Catálogo de clases:** Idiomas (inglés, francés, alemán, italiano) · Ciencias y números (matemáticas, física, química, contabilidad) · Humanidades (ciencias sociales, escritura) · Bienestar y espiritualidad (yoga, pilates, astrología, reiki, ángeles, tarot) · Arte y creatividad (cerámica, arte) · Deportes (tenis, pádel, rutinas de ejercicio) · Tecnología (inteligencia artificial). Se edita en `colombia.mjs`.
 
 **Estudiante**
 - Perfil con ciudad, grado y **colegio público o privado** (nombre y localidad de Bogotá). Los mentores solo ven el grado y el tipo de colegio, nunca el nombre.
 - Si es menor de 18 años registra a su **acudiente**; al mentor se le comparte el celular del acudiente, no el del menor.
-- Busca clases (texto, materia, ciudad, modalidad, precio) y **reserva un horario** disponible del mentor.
+- Marketplace con **categorías y materias**, y filtros por ciudad, modalidad, precio máximo, calificación mínima y orden (mejor calificadas, precio, recientes). Reserva un horario disponible del mentor.
 - Agenda con próximas clases e historial; cancela reservas; deja **reseñas** (1–5 ★ + comentario) cuando la clase ya ocurrió.
 - Publica lo que busca y recibe ofertas de mentores.
 
@@ -46,7 +48,7 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 | `BASE_URL` | URL pública (p. ej. `https://artia.co`); Wompi vuelve a `BASE_URL/api/pagos/retorno` |
 | `WOMPI_PUBLIC_KEY`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_EVENTS_SECRET` | Llaves de Wompi. Con `pub_test_…` usa el sandbox; con `pub_prod_…`, producción |
 | `PAGOS_SIMULADOS=1` | Solo desarrollo: aprueba pagos sin Wompi |
-| `PRECIO_MENTOR` (49900), `PRECIO_ESTUDIANTE` (19900) | Precio mensual en COP (**valores de ejemplo**, defínelos tú) |
+| `PRECIO_MENTOR` (59900), `PRECIO_ESTUDIANTE` (24900) | Precio mensual en COP |
 | `ADMIN_EMAILS` | Correos (separados por coma) que son administradores al registrarse |
 
 ### Configurar Wompi
@@ -61,8 +63,13 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 - `agenda.mjs` — horarios, disponibilidad, reservas y reseñas.
 - `suscripcion.mjs` — pagos y suscripción (Wompi).
 - `verificacion.mjs` — documentos y revisión del administrador.
+- `supabase/schema.sql` — esquema equivalente para PostgreSQL/Supabase (preparado, sin probar).
 - `db.mjs`, `colombia.mjs`, `helpers.mjs` — esquema SQLite, datos de Colombia (ciudades, 20 localidades de Bogotá), utilidades.
 - `public/` — interfaz (HTML/CSS/JS sin build, rutas con `#`). `demo.mjs`, `test.mjs`.
+
+## Supabase (siguiente paso)
+
+Hoy los datos viven en SQLite (un archivo en disco). Para producción conviene Supabase: base de datos administrada y **Storage privado para las cédulas y títulos** (hoy van en la BD sin cifrar). Está preparado `supabase/schema.sql` (tablas, RLS activado sin políticas, bucket privado `documentos-verificacion`). Falta portar la capa de datos del servidor a Postgres (`@supabase/supabase-js` o `pg`) y probarla contra el proyecto: necesita `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` (ver `.env.example`; la llave `service_role` nunca debe llegar al navegador).
 
 ## Pendiente antes de producción
 

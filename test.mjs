@@ -429,3 +429,49 @@ test('sesión, logout, archivos estáticos y cabeceras', async (t) => {
   assert.equal((await fetch(app.base + '/api/nada')).status, 404);
   assert.notEqual((await fetch(app.base + '/..%2f..%2fpackage.json')).status, 200);
 });
+
+test('catálogo por categorías, filtros del marketplace y materias válidas', async (t) => {
+  const app = await iniciar(); t.after(app.cerrar);
+  const cat = (await app.cliente()('GET', '/api/catalogo')).datos;
+  assert.deepEqual(cat.categorias.map((c) => c.nombre), ['Idiomas', 'Ciencias y números', 'Humanidades', 'Bienestar y espiritualidad', 'Arte y creatividad', 'Deportes', 'Tecnología']);
+  for (const m of ['Inglés', 'Francés', 'Alemán', 'Italiano', 'Matemáticas', 'Física', 'Química', 'Contabilidad', 'Ciencias sociales', 'Escritura', 'Yoga', 'Pilates',
+    'Astrología', 'Reiki', 'Ángeles', 'Tarot', 'Cerámica', 'Arte', 'Tenis', 'Pádel', 'Rutinas de ejercicio', 'Inteligencia artificial']) assert.ok(cat.materias.includes(m), m);
+
+  const { m, clase } = await mentorListo(app, 'Laura');
+  await m('PUT', '/api/perfil', { nombre: 'Laura', ciudad: 'Bogotá D.C.', materias: 'Yoga, Tarot' });
+  assert.equal((await m('PUT', '/api/perfil', { nombre: 'Laura', materias: 'Yoga, Brujería' })).estado, 400, 'materia fuera del catálogo');
+  assert.equal((await m('POST', '/api/clases', { titulo: 'x', materia: 'Otra cosa', precio_hora: 40000, modalidad: 'virtual' })).estado, 400);
+  await m('POST', '/api/clases', { titulo: 'Yoga suave', materia: 'Yoga', precio_hora: 30000, modalidad: 'virtual' });
+  await m('POST', '/api/clases', { titulo: 'Tarot', materia: 'Tarot', precio_hora: 90000, modalidad: 'virtual' });
+
+  const e = await estudianteListo(app);
+  const buscar = async (qs) => (await e('GET', '/api/clases' + qs)).datos.clases.map((c) => c.titulo);
+  assert.equal((await buscar('')).length, 3);
+  assert.deepEqual((await buscar('?categoria=Bienestar%20y%20espiritualidad')).sort(), ['Tarot', 'Yoga suave']);
+  assert.deepEqual(await buscar('?categoria=Idiomas'), []);
+  assert.deepEqual(await buscar('?categoria=Inventada'), [], 'categoría desconocida no devuelve nada');
+  assert.deepEqual(await buscar('?materia=Yoga'), ['Yoga suave']);
+  assert.deepEqual(await buscar('?orden=precio_asc'), ['Yoga suave', 'Álgebra', 'Tarot']);
+  assert.deepEqual(await buscar('?orden=precio_desc'), ['Tarot', 'Álgebra', 'Yoga suave']);
+  assert.deepEqual(await buscar('?calificacion_min=4'), [], 'sin reseñas no pasa el filtro de calificación');
+  assert.deepEqual(await buscar('?categoria=Bienestar%20y%20espiritualidad&max=50000'), ['Yoga suave']);
+  assert.equal((await e('POST', '/api/solicitudes', { materia: 'Brujería', modalidad: 'virtual' })).estado, 400);
+});
+
+test('primeros pasos y precios por defecto', async (t) => {
+  const app = await iniciar(); t.after(app.cerrar);
+  const e = app.cliente(); await registrar(e, 'estudiante', 'Ana', { colegio_tipo: 'privado' });
+  let u = (await e('GET', '/api/yo')).datos.usuario;
+  assert.deepEqual(u.pasos.map((p) => p.ok), [false, false, false]);
+  assert.equal(u.suscripcion.precio, 24900, 'estudiante: $24.900 al mes');
+  await e('PUT', '/api/perfil', { nombre: 'Ana', ciudad: 'Bogotá D.C.', colegio_tipo: 'privado', colegio_nombre: 'Colegio X' });
+  await pagarSimulado(e);
+  u = (await e('GET', '/api/yo')).datos.usuario;
+  assert.deepEqual(u.pasos.map((p) => p.ok), [true, true, false]);
+
+  const m = app.cliente(); await registrar(m, 'profesor', 'Luis');
+  u = (await m('GET', '/api/yo')).datos.usuario;
+  assert.equal(u.suscripcion.precio, 59900, 'mentor: $59.900 al mes');
+  assert.deepEqual(u.pasos.map((p) => p.id), ['perfil', 'verificacion', 'suscripcion', 'clase', 'horarios']);
+  assert.ok(u.pasos.every((p) => !p.ok));
+});

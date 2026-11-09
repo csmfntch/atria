@@ -1,0 +1,13 @@
+{
+  "name": "Artia — el arte de aprender",
+  "short_name": "Artia",
+  "description": "Clases con mentores verificados en Colombia. Reserva en minutos.",
+  "lang": "es-CO",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F9F8F6",
+  "theme_color": "#432C7A",
+  "icons": [{ "src": "/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

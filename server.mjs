@@ -6,7 +6,7 @@ import { join, normalize, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { abrirBD } from './db.mjs';
 import {
-  CIUDADES, MATERIAS, NIVELES, MODALIDADES, LOCALIDADES_BOGOTA, COLEGIO_TIPOS, GRADOS, DIAS,
+  CIUDADES, MATERIAS, CATEGORIAS, materiasDe, NIVELES, MODALIDADES, LOCALIDADES_BOGOTA, COLEGIO_TIPOS, GRADOS, DIAS,
   normalizarCelular, normalizarDocumento,
 } from './colombia.mjs';
 import {
@@ -24,7 +24,7 @@ const PUBLICO = join(aqui, 'public');
 const SESION_MS = 30 * 24 * 3600 * 1000;
 const TIPOS = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',
+  '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json', '.png': 'image/png',
 };
 
 export function configDesdeEnv(env = process.env) {
@@ -32,8 +32,8 @@ export function configDesdeEnv(env = process.env) {
   return {
     seguro: produccion,
     baseUrl: (env.BASE_URL ?? `http://localhost:${env.PORT ?? 3100}`).replace(/\/$/, ''),
-    // Precios de la suscripción mensual en COP (valores de ejemplo: ajústalos con variables de entorno).
-    precios: { profesor: Number(env.PRECIO_MENTOR ?? 49900), estudiante: Number(env.PRECIO_ESTUDIANTE ?? 19900) },
+    // Precios de la suscripción mensual en COP (se pueden cambiar con variables de entorno).
+    precios: { profesor: Number(env.PRECIO_MENTOR ?? 59900), estudiante: Number(env.PRECIO_ESTUDIANTE ?? 24900) },
     wompi: env.WOMPI_PUBLIC_KEY && env.WOMPI_INTEGRITY_SECRET
       ? { publicKey: env.WOMPI_PUBLIC_KEY, integritySecret: env.WOMPI_INTEGRITY_SECRET, eventsSecret: env.WOMPI_EVENTS_SECRET ?? '' }
       : null,
@@ -67,13 +67,32 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch } 
       verificado: u.verificacion_estado === 'verificado', promedio: r.promedio, num_resenas: r.n,
     };
   };
+  /** Lista de «primeros pasos» de la cuenta (para guiar la suscripción y la primera reserva). */
+  const pasosDe = (u) => {
+    const contar = (sql) => q(sql).get(u.id).n;
+    const suscrita = suscripcionDe(u).activa;
+    if (u.rol === 'estudiante') {
+      return [
+        { id: 'perfil', ok: !perfilEstudianteFalta(u), texto: 'Completa tu perfil (ciudad y colegio)', enlace: '#/perfil' },
+        { id: 'suscripcion', ok: suscrita, texto: 'Activa tu suscripción', enlace: '#/suscripcion' },
+        { id: 'reserva', ok: contar('SELECT COUNT(*) AS n FROM reservas WHERE estudiante_id = ?') > 0, texto: 'Reserva tu primera clase', enlace: '#/clases' },
+      ];
+    }
+    return [
+      { id: 'perfil', ok: !!(u.ciudad && u.telefono && u.materias && u.tarifa > 0), texto: 'Completa tu perfil (ciudad, celular, materias y tarifa)', enlace: '#/perfil' },
+      { id: 'verificacion', ok: u.verificacion_estado === 'verificado', nota: u.verificacion_estado === 'pendiente' ? 'En revisión' : '', texto: 'Verifica tu identidad (cédula y título)', enlace: '#/verificacion' },
+      { id: 'suscripcion', ok: suscrita, texto: 'Activa tu suscripción', enlace: '#/suscripcion' },
+      { id: 'clase', ok: contar('SELECT COUNT(*) AS n FROM clases WHERE profesor_id = ?') > 0, texto: 'Publica tu primera clase', enlace: '#/mis-clases' },
+      { id: 'horarios', ok: contar('SELECT COUNT(*) AS n FROM horarios WHERE profesor_id = ?') > 0, texto: 'Define tus horarios disponibles', enlace: '#/horarios' },
+    ];
+  };
   const privado = (u) => ({
     ...publico(u), email: u.email, telefono: u.telefono, es_admin: !!u.es_admin,
     documento: u.documento, verificacion_estado: u.verificacion_estado, verificacion_nota: u.verificacion_nota,
     nivel: u.nivel, intereses: u.intereses, colegio_tipo: u.colegio_tipo, colegio_nombre: u.colegio_nombre,
     localidad: u.localidad, grado: u.grado, es_menor: !!u.es_menor,
     acudiente_nombre: u.acudiente_nombre, acudiente_celular: u.acudiente_celular,
-    suscripcion: suscripcionDe(u),
+    suscripcion: suscripcionDe(u), pasos: pasosDe(u),
   });
 
   // Una clase es visible al público si el mentor está verificado y su suscripción está activa.
@@ -131,10 +150,19 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch } 
   };
 
   ruta('GET', '/api/catalogo', () => ({
-    ciudades: CIUDADES, materias: MATERIAS, niveles: NIVELES, localidades: LOCALIDADES_BOGOTA,
+    ciudades: CIUDADES, materias: MATERIAS, categorias: CATEGORIAS, niveles: NIVELES, localidades: LOCALIDADES_BOGOTA,
     colegioTipos: COLEGIO_TIPOS, grados: GRADOS, dias: DIAS,
   }));
 
+  const materia = (v, campo = 'materia') => {
+    const m = texto(v, 60, { requerido: true, campo });
+    return MATERIAS.includes(m) ? m : falla(400, `Elige una ${campo} de la lista.`);
+  };
+  const listaMaterias = (v) => {
+    const lista = listaTexto(v);
+    for (const m of lista ? lista.split(', ') : []) if (!MATERIAS.includes(m)) falla(400, `«${m}» no está en la lista de materias.`);
+    return lista;
+  };
   const clave = (v) => { const c = String(v ?? ''); if (c.length < 8) falla(400, 'La contraseña debe tener al menos 8 caracteres.'); return c; };
   const marcado = (v) => v === true || v === 'true' || v === '1' || v === 'on' || v === 1;
 
@@ -193,7 +221,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch } 
       const doc = body.documento ? normalizarDocumento(body.documento) ?? falla(400, 'La cédula debe tener entre 5 y 12 dígitos.') : '';
       const mod = MODALIDADES.includes(body.modalidad ?? 'ambas') ? (body.modalidad ?? 'ambas') : falla(400, 'Modalidad no válida.');
       q(`UPDATE usuarios SET nombre=?, ciudad=?, telefono=?, bio=?, materias=?, tarifa=?, modalidad=?, experiencia=?, documento=? WHERE id=?`)
-        .run(nombre, ciudad, tel, bio, listaTexto(body.materias), entero(body.tarifa, { campo: 'valor por hora', max: 5_000_000 }),
+        .run(nombre, ciudad, tel, bio, listaMaterias(body.materias), entero(body.tarifa, { campo: 'valor por hora', max: 5_000_000 }),
           mod, texto(body.experiencia, 600), doc, usuario.id);
     } else {
       const tipo = body.colegio_tipo in COLEGIO_TIPOS ? body.colegio_tipo : falla(400, 'Indica si tu colegio es público, privado o si no estás en un colegio.');
@@ -234,13 +262,23 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch } 
     const args = [];
     const like = (s) => `%${s.replace(/[%_\\]/g, '\\$&')}%`;
     if (query.q) { filtros.push(`(c.titulo LIKE ? ESCAPE '\\' OR c.descripcion LIKE ? ESCAPE '\\' OR c.materia LIKE ? ESCAPE '\\')`); args.push(like(query.q), like(query.q), like(query.q)); }
+    if (query.categoria) {
+      const lista = materiasDe(query.categoria);
+      filtros.push(`c.materia IN (${lista.map(() => '?').join(',') || "''"})`); args.push(...lista);
+    }
     if (query.materia) { filtros.push('c.materia = ?'); args.push(query.materia); }
     if (query.ciudad) { filtros.push(`(c.ciudad = ? OR c.modalidad IN ('virtual','ambas'))`); args.push(query.ciudad); }
     if (query.modalidad && MODALIDADES.includes(query.modalidad) && query.modalidad !== 'ambas') {
       filtros.push(`c.modalidad IN (?, 'ambas')`); args.push(query.modalidad);
     }
     if (query.max && /^\d+$/.test(query.max)) { filtros.push('c.precio_hora <= ?'); args.push(Number(query.max)); }
-    return { clases: q(`${SELECT_CLASE} WHERE ${filtros.join(' AND ')} ORDER BY promedio IS NULL, promedio DESC, c.id DESC LIMIT 100`).all(...args) };
+    if (query.calificacion_min && /^[1-5]$/.test(query.calificacion_min)) {
+      filtros.push('(SELECT AVG(calificacion) FROM resenas r WHERE r.profesor_id = c.profesor_id) >= ?'); args.push(Number(query.calificacion_min));
+    }
+    const orden = {
+      precio_asc: 'c.precio_hora ASC, c.id DESC', precio_desc: 'c.precio_hora DESC, c.id DESC', recientes: 'c.id DESC',
+    }[query.orden] ?? 'promedio IS NULL, promedio DESC, num_resenas DESC, c.id DESC';
+    return { clases: q(`${SELECT_CLASE} WHERE ${filtros.join(' AND ')} ORDER BY ${orden} LIMIT 100`).all(...args) };
   });
 
   ruta('GET', '/api/clases/mias', ({ usuario }) => {
@@ -260,7 +298,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch } 
   const leerClase = (body, usuario) => {
     const c = {
       titulo: texto(body.titulo, 100, { requerido: true, campo: 'título' }),
-      materia: texto(body.materia, 60, { requerido: true, campo: 'tema o materia' }),
+      materia: materia(body.materia, 'materia'),
       nivel: texto(body.nivel, 60), descripcion: texto(body.descripcion, 1000),
       precio: entero(body.precio_hora, { min: 5000, max: 5_000_000, campo: 'precio por hora (mínimo $5.000)' }),
       duracion: entero(body.duracion_min ?? 60, { min: 15, max: 480, campo: 'duración' }),
@@ -302,7 +340,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch } 
     const c = texto(body.ciudad || usuario.ciudad, 60);
     if (mod !== 'virtual' && !c) falla(400, 'Indica tu ciudad para clases presenciales.');
     const { lastInsertRowid } = q('INSERT INTO solicitudes (estudiante_id, materia, descripcion, presupuesto, modalidad, ciudad) VALUES (?,?,?,?,?,?)')
-      .run(usuario.id, texto(body.materia, 60, { requerido: true, campo: 'tema o materia' }), texto(body.descripcion, 800),
+      .run(usuario.id, materia(body.materia, 'materia'), texto(body.descripcion, 800),
         entero(body.presupuesto, { max: 5_000_000, campo: 'presupuesto' }), mod, c);
     return json(201, { id: Number(lastInsertRowid) });
   });

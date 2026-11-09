@@ -8,13 +8,18 @@ export const CIUDADES = [
   'Soacha', 'Envigado', 'Bello', 'Itagüí', 'Palmira', 'Buenaventura',
 ];
 
-export const MATERIAS = [
-  'Matemáticas', 'Física', 'Química', 'Biología', 'Lenguaje y literatura',
-  'Inglés', 'Francés', 'Alemán', 'Ciencias sociales', 'Programación',
-  'Excel y ofimática', 'Preparación Saber 11', 'Preparación ICFES / Saber Pro',
-  'Música', 'Guitarra', 'Piano', 'Dibujo y arte', 'Contabilidad',
-  'Estadística', 'Cálculo', 'Refuerzo escolar (primaria)', 'Otra',
+// Catálogo de clases por categoría (para los filtros del marketplace).
+export const CATEGORIAS = [
+  { nombre: 'Idiomas', materias: ['Inglés', 'Francés', 'Alemán', 'Italiano'] },
+  { nombre: 'Ciencias y números', materias: ['Matemáticas', 'Física', 'Química', 'Contabilidad'] },
+  { nombre: 'Humanidades', materias: ['Ciencias sociales', 'Escritura'] },
+  { nombre: 'Bienestar y espiritualidad', materias: ['Yoga', 'Pilates', 'Astrología', 'Reiki', 'Ángeles', 'Tarot'] },
+  { nombre: 'Arte y creatividad', materias: ['Cerámica', 'Arte'] },
+  { nombre: 'Deportes', materias: ['Tenis', 'Pádel', 'Rutinas de ejercicio'] },
+  { nombre: 'Tecnología', materias: ['Inteligencia artificial'] },
 ];
+export const MATERIAS = CATEGORIAS.flatMap((c) => c.materias);
+export const materiasDe = (categoria) => CATEGORIAS.find((c) => c.nombre === categoria)?.materias ?? [];
 
 export const NIVELES = [
   'Primaria', 'Bachillerato', 'Preuniversitario', 'Universitario', 'Adultos / profesional',

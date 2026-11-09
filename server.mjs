@@ -32,7 +32,7 @@ export function configDesdeEnv(env = process.env) {
   const produccion = env.NODE_ENV === 'production';
   return {
     seguro: produccion,
-    baseUrl: (env.BASE_URL ?? `http://localhost:${env.PORT ?? 3100}`).replace(/\/$/, ''),
+    baseUrl: (env.BASE_URL ?? (env.RAILWAY_PUBLIC_DOMAIN ? `https://${env.RAILWAY_PUBLIC_DOMAIN}` : `http://localhost:${env.PORT ?? 3100}`)).replace(/\/$/, ''),
     // Precios de la suscripción mensual en COP (se pueden cambiar con variables de entorno).
     precios: { profesor: Number(env.PRECIO_MENTOR ?? 59900), estudiante: Number(env.PRECIO_ESTUDIANTE ?? 24900) },
     wompi: env.WOMPI_PUBLIC_KEY && env.WOMPI_INTEGRITY_SECRET
@@ -442,7 +442,11 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
 
 // ---------- arranque ----------
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const rutaBD = process.env.DB_PATH ?? join(aqui, 'data', 'artia.db');
+  // Base de datos: DB_PATH, o el volumen persistente de Railway, o ./data para desarrollo.
+  const volumen = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+  const rutaBD = process.env.DB_PATH ?? (volumen ? join(volumen, 'artia.db') : join(aqui, 'data', 'artia.db'));
+  if (process.env.NODE_ENV === 'production' && !process.env.DB_PATH && !volumen)
+    console.warn('⚠ Sin volumen persistente: la base de datos se perderá en cada despliegue. Adjunta un volumen o define DB_PATH.');
   const db = abrirBD(rutaBD);
   if (process.argv.includes('--demo')) (await import('./demo.mjs')).sembrar(db, { hashClave });
   const puerto = Number(process.env.PORT ?? 3100);

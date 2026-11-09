@@ -527,3 +527,12 @@ test('salud y límite de intentos por IP real detrás de un proxy', async (t) =>
   assert.equal(await intento('1.1.1.1'), 429, 'esa IP queda bloqueada');
   assert.equal(await intento('2.2.2.2'), 401, 'otra persona no se ve afectada');
 });
+
+test('configuración por entorno: dominio público de Railway y precios', async () => {
+  const { configDesdeEnv } = await import('./server.mjs');
+  assert.equal(configDesdeEnv({ RAILWAY_PUBLIC_DOMAIN: 'artia.up.railway.app' }).baseUrl, 'https://artia.up.railway.app');
+  assert.equal(configDesdeEnv({ BASE_URL: 'https://artia.co/', RAILWAY_PUBLIC_DOMAIN: 'x.up.railway.app' }).baseUrl, 'https://artia.co', 'BASE_URL manda y se quita la barra final');
+  assert.equal(configDesdeEnv({}).baseUrl, 'http://localhost:3100');
+  assert.equal(configDesdeEnv({ TRUST_PROXY: '1' }).confiarProxy, true);
+  assert.equal(configDesdeEnv({ NODE_ENV: 'production', PAGOS_SIMULADOS: '1' }).pagosSimulados, false, 'sin pagos simulados en producción');
+});

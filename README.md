@@ -67,16 +67,23 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 - `db.mjs`, `colombia.mjs`, `helpers.mjs` — esquema SQLite, datos de Colombia (ciudades, 20 localidades de Bogotá), utilidades.
 - `public/` — interfaz (HTML/CSS/JS sin build, rutas con `#`). `demo.mjs`, `test.mjs`.
 
-## Desplegar (Render)
+## Desplegar (Railway)
 
-1. Crea una cuenta en [render.com](https://render.com) y conecta tu GitHub (da acceso al repositorio `atria`).
-2. **New → Blueprint** y elige el repositorio: Render lee `render.yaml` y crea el servicio con su disco persistente (plan Starter, de pago: el disco guarda la base SQLite).
-3. Cuando lo pida, llena las variables: `BASE_URL` (la URL de Render o tu dominio), `ADMIN_EMAILS` (tu correo), `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, y las de Wompi cuando las tengas.
-4. Abre la URL, crea tu cuenta con el correo de `ADMIN_EMAILS` y ya eres administrador.
-5. Dominio propio: Render → Settings → Custom Domains (el HTTPS es automático). Actualiza `BASE_URL`.
-6. Wompi: en su panel pon la URL de eventos `BASE_URL/api/wompi/eventos`.
+1. Crea una cuenta en [railway.com](https://railway.com) y entra con GitHub (da acceso al repositorio `atria`).
+2. **New Project → Deploy from GitHub repo** → `csmfntch/atria`. Railway detecta Node y usa `npm start`.
+3. En el servicio: **Settings → Volumes → Add Volume** con mount path `/data`. Ahí vive la base de datos SQLite; Atria la encuentra sola (`RAILWAY_VOLUME_MOUNT_PATH`). **Sin volumen se pierden los datos en cada despliegue.**
+4. **Settings → Networking → Generate Domain** para tener una URL pública. En **Settings → Deploy** pon el *Healthcheck Path* `/api/salud`.
+5. **Variables** (pestaña Variables del servicio):
+   - `NODE_ENV=production`, `TRUST_PROXY=1`
+   - `ADMIN_EMAILS` (tu correo), `BASE_URL` (la URL pública; si no la pones usa `RAILWAY_PUBLIC_DOMAIN`)
+   - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (la llave secreta)
+   - `PRECIO_ESTUDIANTE=24900`, `PRECIO_MENTOR=59900` (ya son los valores por defecto)
+   - Wompi cuando las tengas: `WOMPI_PUBLIC_KEY`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_EVENTS_SECRET`
+6. Abre la URL, regístrate con el correo de `ADMIN_EMAILS` y ya eres administrador.
+7. Dominio propio: Settings → Networking → Custom Domain (HTTPS automático). Actualiza `BASE_URL`.
+8. Wompi: en su panel pon la URL de eventos `BASE_URL/api/wompi/eventos`.
 
-Railway y Fly.io también sirven (necesitan un volumen persistente y `TRUST_PROXY=1`). **No uses hosting estático** (Netlify, Vercel…): Artia necesita un servidor Node.
+También sirve cualquier host con servidor Node y volumen persistente (Fly.io, un VPS…). **No uses hosting estático** (Netlify, Vercel…): Artia necesita un servidor Node.
 
 ## Supabase
 
@@ -90,7 +97,6 @@ La llave secreta (`sb_secret_…` / `service_role`) vive solo en el servidor y n
 
 ## Pendiente antes de producción
 
-- **Hosting:** servidor Node con disco persistente (Render, Railway, Fly.io, VPS).
 - **Cobro recurrente automático:** hoy cada mes se renueva con un pago manual. El débito automático requiere fuentes de pago tokenizadas de Wompi.
 - **Documentos sensibles:** con Supabase quedan en un bucket privado; define cuánto tiempo conservas las cédulas tras verificar (y bórralas cuando ya no se necesiten). Sin Supabase se guardan en la base local sin cifrar.
 - **Menores de edad y datos personales:** valida con un abogado el consentimiento del acudiente y la política de tratamiento de datos (Ley 1581 de 2012, Habeas Data; datos de menores). Falta redactar términos y política.

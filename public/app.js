@@ -372,9 +372,15 @@ async function vistaVerificacion(params = new URLSearchParams()) {
     <div class="paso">
       <b>${titulo}</b> ${doc(tipo) ? html`<span class="etiqueta ok">Cargado</span>` : html`<span class="etiqueta espera">Falta</span>`}
       <p class="suave">${ayuda}</p>
-      ${editable ? html`<input type="file" data-doc="${tipo}" accept="image/png,image/jpeg,application/pdf" aria-label="Subir ${titulo}">` : ''}
+      ${doc(tipo) ? html`<p class="archivo-ok">✓ Guardado el ${fechaSQL(doc(tipo).creado)} (${{ 'image/png': 'imagen PNG', 'image/jpeg': 'imagen JPG', 'application/pdf': 'PDF' }[doc(tipo).mime] ?? 'archivo'}).${editable ? ' Si quieres cambiarlo, elige otro archivo.' : ''}</p>` : ''}
+      ${editable ? html`<input type="file" data-doc="${tipo}" accept="image/png,image/jpeg,application/pdf" aria-label="${doc(tipo) ? 'Reemplazar' : 'Subir'} ${titulo}">` : ''}
     </div>`;
   const k = KYC_TXT[v.kyc.estado] ?? KYC_TXT[''];
+  const faltan = [];
+  if (!v.documento) faltan.push('guardar el número de tu cédula (botón «Guardar cédula»)');
+  if (conKyc) { if (!['aprobado', 'revision'].includes(v.kyc.estado)) faltan.push('completar la verificación de identidad (paso 2)'); }
+  else if (!doc('cedula')) faltan.push('subir la foto de tu cédula');
+  if (!doc('titulo')) faltan.push('subir tu título o certificado');
   pintar(html`
     ${tabsCuenta('verificacion')}
     <h1>Verificación de mentor</h1>
@@ -413,6 +419,7 @@ async function vistaVerificacion(params = new URLSearchParams()) {
       ${conKyc ? '' : paso('cedula', 'Foto de tu cédula (por ambos lados)', 'JPG, PNG o PDF, máximo 4 MB. Debe verse completa y legible.')}
       ${paso('titulo', 'Título, diploma o certificado', 'Del estudio o experiencia que respalda lo que enseñas (JPG, PNG o PDF, máximo 4 MB). Un administrador puede revisarlo.')}
       ${editable ? html`<button class="btn" data-accion="enviar-verificacion" ${v.completo ? '' : new Raw('disabled')}>${conKyc ? 'Terminar verificación' : 'Enviar a revisión'}</button>
+        ${v.completo ? '' : html`<p class="banner espera" role="status">Para continuar falta: ${faltan.join(', ')}.</p>`}
         <p class="suave">Solo el equipo de Artia ve tus documentos. No se muestran en tu perfil público.</p>` : ''}
     </section>` : ''}`, { aviso: false });
 }

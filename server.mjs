@@ -159,7 +159,8 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     exigir, exigirAdmin, exigirSuscripcion, exigirMentorActivo, perfilEstudianteFalta, resumenResenas,
   };
 
-  ruta('GET', '/api/salud', () => ({ ok: true }));
+  // `version`: commit desplegado (Railway lo define), para comprobar qué versión está en línea.
+  ruta('GET', '/api/salud', () => ({ ok: true, version: (process.env.RAILWAY_GIT_COMMIT_SHA ?? '').slice(0, 7) || 'local', kyc: ctx.kyc?.modo ?? 'ninguno', pagos: config.wompi ? 'wompi' : config.pagosSimulados ? 'simulado' : 'ninguno' }));
 
   ruta('GET', '/api/catalogo', () => ({
     ciudades: CIUDADES, materias: MATERIAS, categorias: CATEGORIAS, niveles: NIVELES, localidades: LOCALIDADES_BOGOTA,

@@ -523,7 +523,10 @@ test('salud y límite de intentos por IP real detrás de un proxy', async (t) =>
   await registrar(app.cliente(), 'profesor', 'Luis');
   const intento = (ip) => fetch(app.base + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-forwarded-for': ip },
     body: JSON.stringify({ email: 'luis@x.co', password: 'mala' }) }).then((r) => r.status);
-  assert.equal((await fetch(app.base + '/api/salud')).status, 200);
+  const salud = await (await fetch(app.base + '/api/salud')).json();
+  assert.equal(salud.ok, true);
+  assert.equal(salud.kyc, 'ninguno');
+  assert.ok(salud.version);
   for (let i = 0; i < 8; i++) assert.equal(await intento('1.1.1.1'), 401);
   assert.equal(await intento('1.1.1.1'), 429, 'esa IP queda bloqueada');
   assert.equal(await intento('2.2.2.2'), 401, 'otra persona no se ve afectada');

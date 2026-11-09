@@ -190,3 +190,5 @@ input[type=radio],input[type=checkbox]{accent-color:var(--morado)}
 }
 @supports (padding:max(0px)){.pie{padding-bottom:max(2rem,env(safe-area-inset-bottom))}}
 #aviso{width:max-content}
+
+.archivo-ok{color:#14532d;font-size:.9rem;margin:.2rem 0 .5rem}

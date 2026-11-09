@@ -1,11 +1,23 @@
 // Servidor de Artia: API JSON + archivos estáticos, sin dependencias.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { join, normalize, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { abrirBD } from './db.mjs';
-import { CIUDADES, MATERIAS, NIVELES, MODALIDADES, normalizarCelular } from './colombia.mjs';
+import {
+  CIUDADES, MATERIAS, NIVELES, MODALIDADES, LOCALIDADES_BOGOTA, COLEGIO_TIPOS, GRADOS, DIAS,
+  normalizarCelular, normalizarDocumento,
+} from './colombia.mjs';
+import {
+  ErrorHTTP, Resp, falla, json, hashClave, verificarClave, texto, entero, listaTexto,
+  leerCookie, leerJSON, leerBinario,
+} from './helpers.mjs';
+import { registrarAgenda } from './agenda.mjs';
+import { registrarSuscripcion } from './suscripcion.mjs';
+import { registrarVerificacion } from './verificacion.mjs';
+
+export { hashClave };
 
 const aqui = dirname(fileURLToPath(import.meta.url));
 const PUBLICO = join(aqui, 'public');
@@ -15,80 +27,69 @@ const TIPOS = {
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',
 };
 
-class ErrorHTTP extends Error {
-  constructor(estado, mensaje) { super(mensaje); this.estado = estado; }
-}
-const falla = (estado, mensaje) => { throw new ErrorHTTP(estado, mensaje); };
-
-// ---------- utilidades ----------
-function hashClave(clave) {
-  const sal = randomBytes(16);
-  return `${sal.toString('hex')}:${scryptSync(clave, sal, 64).toString('hex')}`;
-}
-function verificarClave(clave, guardado) {
-  const [sal, hash] = guardado.split(':');
-  const h = scryptSync(clave, Buffer.from(sal, 'hex'), 64);
-  return timingSafeEqual(h, Buffer.from(hash, 'hex'));
-}
-const texto = (v, max, { requerido = false, campo = 'campo' } = {}) => {
-  const s = String(v ?? '').trim().slice(0, max);
-  if (requerido && !s) falla(400, `Falta el ${campo}.`);
-  return s;
-};
-const entero = (v, { min = 0, max = 100_000_000, campo = 'valor' } = {}) => {
-  const n = Number.parseInt(v ?? 0, 10);
-  if (!Number.isFinite(n) || n < min || n > max) falla(400, `El ${campo} no es válido.`);
-  return n;
-};
-const modalidad = (v) => (MODALIDADES.includes(v) ? v : falla(400, 'Modalidad no válida.'));
-const ciudad = (v) => {
-  const c = texto(v, 60);
-  return c;
-};
-const listaTexto = (v, max = 200) =>
-  [...new Set(String(v ?? '').split(',').map((s) => s.trim()).filter(Boolean))].join(', ').slice(0, max);
-
-function leerCookie(req, nombre) {
-  for (const parte of (req.headers.cookie ?? '').split(';')) {
-    const [k, ...v] = parte.trim().split('=');
-    if (k === nombre) return decodeURIComponent(v.join('='));
-  }
-  return null;
-}
-
-async function leerJSON(req) {
-  const trozos = [];
-  let total = 0;
-  for await (const t of req) {
-    total += t.length;
-    if (total > 50_000) falla(413, 'Solicitud demasiado grande.');
-    trozos.push(t);
-  }
-  if (!total) return {};
-  if (!String(req.headers['content-type'] ?? '').includes('application/json'))
-    falla(415, 'Se esperaba JSON.');
-  try { return JSON.parse(Buffer.concat(trozos).toString('utf8')); }
-  catch { return falla(400, 'JSON inválido.'); }
+export function configDesdeEnv(env = process.env) {
+  const produccion = env.NODE_ENV === 'production';
+  return {
+    seguro: produccion,
+    baseUrl: (env.BASE_URL ?? `http://localhost:${env.PORT ?? 3100}`).replace(/\/$/, ''),
+    // Precios de la suscripción mensual en COP (valores de ejemplo: ajústalos con variables de entorno).
+    precios: { profesor: Number(env.PRECIO_MENTOR ?? 49900), estudiante: Number(env.PRECIO_ESTUDIANTE ?? 19900) },
+    wompi: env.WOMPI_PUBLIC_KEY && env.WOMPI_INTEGRITY_SECRET
+      ? { publicKey: env.WOMPI_PUBLIC_KEY, integritySecret: env.WOMPI_INTEGRITY_SECRET, eventsSecret: env.WOMPI_EVENTS_SECRET ?? '' }
+      : null,
+    pagosSimulados: env.PAGOS_SIMULADOS === '1' && !produccion,
+    adminEmails: (env.ADMIN_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+  };
 }
 
 // ---------- aplicación ----------
-export function crearApp(db, { seguro = false } = {}) {
+export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch } = {}) {
+  const config = { ...configDesdeEnv({}), ...configParcial };
   const q = (sql) => db.prepare(sql);
   const intentos = new Map(); // limitador simple de inicio de sesión: ip -> {n, hasta}
 
-  const publico = (u) => ({
-    id: u.id, rol: u.rol, nombre: u.nombre, ciudad: u.ciudad, bio: u.bio,
-    materias: u.materias, tarifa: u.tarifa, modalidad: u.modalidad,
-    experiencia: u.experiencia, nivel: u.nivel, intereses: u.intereses,
-  });
-  const privado = (u) => ({ ...publico(u), email: u.email, telefono: u.telefono });
+  for (const email of config.adminEmails) q('UPDATE usuarios SET es_admin = 1 WHERE email = ?').run(email);
 
+  // ----- consultas compartidas -----
+  const SUSCRITO = (col) => `EXISTS (SELECT 1 FROM suscripciones s WHERE s.usuario_id = ${col} AND s.vence > datetime('now'))`;
+  const suscripcionDe = (u) => {
+    const s = q('SELECT vence FROM suscripciones WHERE usuario_id = ?').get(u.id);
+    const activa = !!s && s.vence > new Date().toISOString().slice(0, 19).replace('T', ' ');
+    return { activa, vence: s?.vence ?? null, precio: config.precios[u.rol], plan: u.rol === 'profesor' ? 'Mentor' : 'Estudiante' };
+  };
+  const resumenResenas = (profId) => q('SELECT COUNT(*) AS n, ROUND(AVG(calificacion), 1) AS promedio FROM resenas WHERE profesor_id = ?').get(profId);
+
+  const publico = (u) => {
+    const r = u.rol === 'profesor' ? resumenResenas(u.id) : { n: 0, promedio: null };
+    return {
+      id: u.id, rol: u.rol, nombre: u.nombre, ciudad: u.ciudad, bio: u.bio,
+      materias: u.materias, tarifa: u.tarifa, modalidad: u.modalidad, experiencia: u.experiencia,
+      verificado: u.verificacion_estado === 'verificado', promedio: r.promedio, num_resenas: r.n,
+    };
+  };
+  const privado = (u) => ({
+    ...publico(u), email: u.email, telefono: u.telefono, es_admin: !!u.es_admin,
+    documento: u.documento, verificacion_estado: u.verificacion_estado, verificacion_nota: u.verificacion_nota,
+    nivel: u.nivel, intereses: u.intereses, colegio_tipo: u.colegio_tipo, colegio_nombre: u.colegio_nombre,
+    localidad: u.localidad, grado: u.grado, es_menor: !!u.es_menor,
+    acudiente_nombre: u.acudiente_nombre, acudiente_celular: u.acudiente_celular,
+    suscripcion: suscripcionDe(u),
+  });
+
+  // Una clase es visible al público si el mentor está verificado y su suscripción está activa.
+  const SELECT_CLASE = `SELECT c.*, u.nombre AS profesor_nombre,
+      (u.verificacion_estado = 'verificado') AS verificado,
+      (SELECT ROUND(AVG(calificacion), 1) FROM resenas r WHERE r.profesor_id = c.profesor_id) AS promedio,
+      (SELECT COUNT(*) FROM resenas r WHERE r.profesor_id = c.profesor_id) AS num_resenas
+    FROM clases c JOIN usuarios u ON u.id = c.profesor_id`;
+  const VISIBLE = `c.activa = 1 AND u.verificacion_estado = 'verificado' AND ${SUSCRITO('u.id')}`;
+
+  // ----- sesión -----
   function crearSesion(res, usuarioId) {
     const token = randomBytes(32).toString('hex');
-    q('INSERT INTO sesiones (token, usuario_id, expira) VALUES (?,?,?)')
-      .run(token, usuarioId, Date.now() + SESION_MS);
+    q('INSERT INTO sesiones (token, usuario_id, expira) VALUES (?,?,?)').run(token, usuarioId, Date.now() + SESION_MS);
     res.setHeader('Set-Cookie',
-      `sid=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESION_MS / 1000}${seguro ? '; Secure' : ''}`);
+      `sid=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESION_MS / 1000}${config.seguro ? '; Secure' : ''}`);
   }
   function usuarioActual(req) {
     const token = leerCookie(req, 'sid');
@@ -100,28 +101,59 @@ export function crearApp(db, { seguro = false } = {}) {
   }
   const exigir = (u, rol) => {
     if (!u) falla(401, 'Debes iniciar sesión.');
-    if (rol && u.rol !== rol) falla(403, `Solo disponible para ${rol === 'profesor' ? 'profesores' : 'estudiantes'}.`);
+    if (rol && u.rol !== rol) falla(403, `Solo disponible para ${rol === 'profesor' ? 'mentores' : 'estudiantes'}.`);
     return u;
+  };
+  const exigirAdmin = (u) => { exigir(u); if (!u.es_admin) falla(403, 'Solo para administradores.'); return u; };
+  const exigirSuscripcion = (u) => {
+    if (!suscripcionDe(u).activa) falla(402, 'Necesitas una suscripción activa. Actívala en la sección «Suscripción».');
+  };
+  const exigirMentorActivo = (u) => {
+    exigir(u, 'profesor');
+    if (u.verificacion_estado !== 'verificado') falla(403, 'Tu cuenta de mentor aún no está verificada.');
+    exigirSuscripcion(u);
+  };
+  /** Mensaje de lo que falta del perfil del estudiante, o null si está completo. */
+  const perfilEstudianteFalta = (u) => {
+    if (!u.ciudad) return 'Indica tu ciudad en tu perfil.';
+    if (!u.colegio_tipo) return 'Indica en tu perfil si tu colegio es público o privado.';
+    if (u.colegio_tipo !== 'ninguno' && !u.colegio_nombre) return 'Indica el nombre de tu colegio en tu perfil.';
+    if (u.es_menor && (!u.acudiente_nombre || !u.acudiente_celular)) return 'Como eres menor de edad, agrega los datos de tu acudiente en tu perfil.';
+    return null;
   };
 
   // ---------- rutas ----------
   const rutas = [];
-  const ruta = (metodo, patron, fn) => rutas.push({ metodo, re: new RegExp(`^${patron}$`), fn });
+  const ruta = (metodo, patron, fn, opciones = {}) => rutas.push({ metodo, re: new RegExp(`^${patron}$`), fn, ...opciones });
+  const ctx = {
+    db, q, ruta, config, fetchFn, SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
+    exigir, exigirAdmin, exigirSuscripcion, exigirMentorActivo, perfilEstudianteFalta, resumenResenas,
+  };
 
-  ruta('GET', '/api/catalogo', () => ({ ciudades: CIUDADES, materias: MATERIAS, niveles: NIVELES }));
+  ruta('GET', '/api/catalogo', () => ({
+    ciudades: CIUDADES, materias: MATERIAS, niveles: NIVELES, localidades: LOCALIDADES_BOGOTA,
+    colegioTipos: COLEGIO_TIPOS, grados: GRADOS, dias: DIAS,
+  }));
 
-  ruta('POST', '/api/registro', ({ body, res, ip }) => {
-    const rol = body.rol === 'profesor' || body.rol === 'estudiante' ? body.rol : falla(400, 'Elige si eres profesor o estudiante.');
+  const clave = (v) => { const c = String(v ?? ''); if (c.length < 8) falla(400, 'La contraseña debe tener al menos 8 caracteres.'); return c; };
+  const marcado = (v) => v === true || v === 'true' || v === '1' || v === 'on' || v === 1;
+
+  ruta('POST', '/api/registro', ({ body, res }) => {
+    const rol = body.rol === 'profesor' || body.rol === 'estudiante' ? body.rol : falla(400, 'Elige si eres mentor o estudiante.');
     const email = texto(body.email, 120, { requerido: true, campo: 'correo' }).toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) falla(400, 'El correo no es válido.');
-    const clave = String(body.password ?? '');
-    if (clave.length < 8) falla(400, 'La contraseña debe tener al menos 8 caracteres.');
     const nombre = texto(body.nombre, 80, { requerido: true, campo: 'nombre' });
+    const pass = clave(body.password);
+    let colegio = '', menor = 0;
+    if (rol === 'estudiante') {
+      colegio = body.colegio_tipo in COLEGIO_TIPOS ? body.colegio_tipo : falla(400, 'Indica si tu colegio es público, privado o si no estás en un colegio.');
+      menor = marcado(body.es_menor) ? 1 : 0;
+    }
     if (q('SELECT 1 FROM usuarios WHERE email = ?').get(email)) falla(409, 'Ya existe una cuenta con ese correo.');
-    const { lastInsertRowid } = q('INSERT INTO usuarios (email, pass_hash, rol, nombre) VALUES (?,?,?,?)')
-      .run(email, hashClave(clave), rol, nombre);
+    const { lastInsertRowid } = q('INSERT INTO usuarios (email, pass_hash, rol, nombre, colegio_tipo, es_menor, es_admin) VALUES (?,?,?,?,?,?,?)')
+      .run(email, hashClave(pass), rol, nombre, colegio, menor, config.adminEmails.includes(email) ? 1 : 0);
     crearSesion(res, Number(lastInsertRowid));
-    return { estado: 201, datos: { usuario: privado(q('SELECT * FROM usuarios WHERE id = ?').get(lastInsertRowid)) } };
+    return json(201, { usuario: privado(q('SELECT * FROM usuarios WHERE id = ?').get(lastInsertRowid)) });
   });
 
   ruta('POST', '/api/login', ({ body, res, ip }) => {
@@ -134,6 +166,8 @@ export function crearApp(db, { seguro = false } = {}) {
       falla(401, 'Correo o contraseña incorrectos.');
     }
     intentos.delete(ip);
+    if (body.rol && body.rol !== u.rol && !u.es_admin)
+      falla(403, u.rol === 'profesor' ? 'Esta cuenta es de mentor. Ingresa por «Soy mentor».' : 'Esta cuenta es de estudiante. Ingresa por «Soy estudiante».');
     crearSesion(res, u.id);
     return { usuario: privado(u) };
   });
@@ -150,71 +184,99 @@ export function crearApp(db, { seguro = false } = {}) {
   ruta('PUT', '/api/perfil', ({ usuario, body }) => {
     exigir(usuario);
     const tel = body.telefono ? normalizarCelular(body.telefono) ?? falla(400, 'El celular debe tener 10 dígitos y empezar por 3 (ej. 300 123 4567).') : '';
-    const comunes = [texto(body.nombre, 80, { requerido: true, campo: 'nombre' }), ciudad(body.ciudad), tel, texto(body.bio, 600)];
+    const nombre = texto(body.nombre, 80, { requerido: true, campo: 'nombre' });
+    const ciudad = texto(body.ciudad, 60);
+    if (ciudad && !CIUDADES.includes(ciudad)) falla(400, 'Selecciona una ciudad de la lista.');
+    const bio = texto(body.bio, 600);
+
     if (usuario.rol === 'profesor') {
-      q(`UPDATE usuarios SET nombre=?, ciudad=?, telefono=?, bio=?, materias=?, tarifa=?, modalidad=?, experiencia=? WHERE id=?`)
-        .run(...comunes, listaTexto(body.materias), entero(body.tarifa, { campo: 'valor por hora', max: 5_000_000 }),
-          modalidad(body.modalidad ?? 'ambas'), texto(body.experiencia, 600), usuario.id);
+      const doc = body.documento ? normalizarDocumento(body.documento) ?? falla(400, 'La cédula debe tener entre 5 y 12 dígitos.') : '';
+      const mod = MODALIDADES.includes(body.modalidad ?? 'ambas') ? (body.modalidad ?? 'ambas') : falla(400, 'Modalidad no válida.');
+      q(`UPDATE usuarios SET nombre=?, ciudad=?, telefono=?, bio=?, materias=?, tarifa=?, modalidad=?, experiencia=?, documento=? WHERE id=?`)
+        .run(nombre, ciudad, tel, bio, listaTexto(body.materias), entero(body.tarifa, { campo: 'valor por hora', max: 5_000_000 }),
+          mod, texto(body.experiencia, 600), doc, usuario.id);
     } else {
-      q(`UPDATE usuarios SET nombre=?, ciudad=?, telefono=?, bio=?, nivel=?, intereses=? WHERE id=?`)
-        .run(...comunes, texto(body.nivel, 60), listaTexto(body.intereses), usuario.id);
+      const tipo = body.colegio_tipo in COLEGIO_TIPOS ? body.colegio_tipo : falla(400, 'Indica si tu colegio es público, privado o si no estás en un colegio.');
+      const nombreColegio = tipo === 'ninguno' ? '' : texto(body.colegio_nombre, 100, { requerido: true, campo: 'nombre del colegio' });
+      const localidad = texto(body.localidad, 40);
+      if (localidad && !LOCALIDADES_BOGOTA.includes(localidad)) falla(400, 'Selecciona una localidad de Bogotá de la lista.');
+      const grado = texto(body.grado, 30);
+      if (grado && !GRADOS.includes(grado)) falla(400, 'Selecciona un grado de la lista.');
+      const menor = marcado(body.es_menor) ? 1 : 0;
+      let acuNombre = '', acuCel = '';
+      if (menor) {
+        acuNombre = texto(body.acudiente_nombre, 80, { requerido: true, campo: 'nombre del acudiente' });
+        acuCel = normalizarCelular(body.acudiente_celular) ?? falla(400, 'El celular del acudiente debe tener 10 dígitos y empezar por 3.');
+      }
+      q(`UPDATE usuarios SET nombre=?, ciudad=?, telefono=?, bio=?, nivel=?, intereses=?, colegio_tipo=?, colegio_nombre=?, localidad=?,
+           grado=?, es_menor=?, acudiente_nombre=?, acudiente_celular=? WHERE id=?`)
+        .run(nombre, ciudad, tel, bio, texto(body.nivel, 60), listaTexto(body.intereses), tipo, nombreColegio,
+          tipo === 'ninguno' ? '' : localidad, grado, menor, acuNombre, acuCel, usuario.id);
     }
     return { usuario: privado(q('SELECT * FROM usuarios WHERE id = ?').get(usuario.id)) };
   });
 
-  ruta('GET', '/api/profesores/(\\d+)', ({ params }) => {
-    const p = q(`SELECT * FROM usuarios WHERE id = ? AND rol = 'profesor'`).get(params[0]) ?? falla(404, 'Profesor no encontrado.');
-    const clases = q('SELECT * FROM clases WHERE profesor_id = ? AND activa = 1 ORDER BY id DESC').all(p.id);
-    return { profesor: publico(p), clases };
+  // ----- mentores (públicos solo si están verificados) -----
+  ruta('GET', '/api/profesores/(\\d+)', ({ params, usuario }) => {
+    const p = q(`SELECT * FROM usuarios WHERE id = ? AND rol = 'profesor'`).get(params[0]) ?? falla(404, 'Mentor no encontrado.');
+    if (p.verificacion_estado !== 'verificado' && usuario?.id !== p.id && !usuario?.es_admin) falla(404, 'Mentor no encontrado.');
+    const clases = q(`${SELECT_CLASE} WHERE c.profesor_id = ? AND c.activa = 1 ORDER BY c.id DESC`).all(p.id);
+    const resenas = q(`SELECT r.calificacion, r.comentario, r.creado, e.nombre AS autor FROM resenas r
+      JOIN usuarios e ON e.id = r.estudiante_id WHERE r.profesor_id = ? ORDER BY r.id DESC LIMIT 50`).all(p.id)
+      .map((r) => ({ ...r, autor: abreviar(r.autor) }));
+    return { profesor: publico(p), clases: suscripcionDe(p).activa || usuario?.id === p.id ? clases : [], resenas };
   });
+  const abreviar = (n) => { const [a, b] = n.split(' '); return b ? `${a} ${b[0]}.` : a; };
 
-  // --- clases ---
-  const SELECT_CLASE = `SELECT c.*, u.nombre AS profesor_nombre FROM clases c JOIN usuarios u ON u.id = c.profesor_id`;
-
+  // ----- clases -----
   ruta('GET', '/api/clases', ({ query }) => {
-    const filtros = ['c.activa = 1'];
+    const filtros = [VISIBLE];
     const args = [];
     const like = (s) => `%${s.replace(/[%_\\]/g, '\\$&')}%`;
     if (query.q) { filtros.push(`(c.titulo LIKE ? ESCAPE '\\' OR c.descripcion LIKE ? ESCAPE '\\' OR c.materia LIKE ? ESCAPE '\\')`); args.push(like(query.q), like(query.q), like(query.q)); }
     if (query.materia) { filtros.push('c.materia = ?'); args.push(query.materia); }
     if (query.ciudad) { filtros.push(`(c.ciudad = ? OR c.modalidad IN ('virtual','ambas'))`); args.push(query.ciudad); }
-    if (query.modalidad && MODALIDADES.includes(query.modalidad)) {
-      filtros.push(query.modalidad === 'ambas' ? '1=1' : `c.modalidad IN (?, 'ambas')`);
-      if (query.modalidad !== 'ambas') args.push(query.modalidad);
+    if (query.modalidad && MODALIDADES.includes(query.modalidad) && query.modalidad !== 'ambas') {
+      filtros.push(`c.modalidad IN (?, 'ambas')`); args.push(query.modalidad);
     }
     if (query.max && /^\d+$/.test(query.max)) { filtros.push('c.precio_hora <= ?'); args.push(Number(query.max)); }
-    return { clases: q(`${SELECT_CLASE} WHERE ${filtros.join(' AND ')} ORDER BY c.id DESC LIMIT 100`).all(...args) };
+    return { clases: q(`${SELECT_CLASE} WHERE ${filtros.join(' AND ')} ORDER BY promedio IS NULL, promedio DESC, c.id DESC LIMIT 100`).all(...args) };
   });
 
   ruta('GET', '/api/clases/mias', ({ usuario }) => {
     exigir(usuario, 'profesor');
-    return { clases: q(`${SELECT_CLASE} WHERE c.profesor_id = ? ORDER BY c.id DESC`).all(usuario.id) };
+    const motivo = usuario.verificacion_estado !== 'verificado' ? 'Pendiente de verificación'
+      : !suscripcionDe(usuario).activa ? 'Suscripción inactiva' : '';
+    return { clases: q(`${SELECT_CLASE} WHERE c.profesor_id = ? ORDER BY c.id DESC`).all(usuario.id).map((c) => ({ ...c, oculta_por: c.activa ? motivo : '' })) };
   });
 
-  ruta('GET', '/api/clases/(\\d+)', ({ params }) => {
-    const c = q(`${SELECT_CLASE} WHERE c.id = ? AND c.activa = 1`).get(params[0]) ?? falla(404, 'Clase no encontrada.');
-    const prof = q('SELECT * FROM usuarios WHERE id = ?').get(c.profesor_id);
-    return { clase: c, profesor: publico(prof) };
+  ruta('GET', '/api/clases/(\\d+)', ({ params, usuario }) => {
+    const c = q(`${SELECT_CLASE} WHERE c.id = ?`).get(params[0]) ?? falla(404, 'Clase no encontrada.');
+    const visible = q(`${SELECT_CLASE} WHERE c.id = ? AND ${VISIBLE}`).get(params[0]);
+    if (!visible && usuario?.id !== c.profesor_id && !usuario?.es_admin) falla(404, 'Clase no encontrada.');
+    return { clase: c, profesor: publico(q('SELECT * FROM usuarios WHERE id = ?').get(c.profesor_id)), reservable: !!visible };
   });
 
-  const leerClase = (body, usuario) => ({
-    titulo: texto(body.titulo, 100, { requerido: true, campo: 'título' }),
-    materia: texto(body.materia, 60, { requerido: true, campo: 'tema o materia' }),
-    nivel: texto(body.nivel, 60),
-    descripcion: texto(body.descripcion, 1000),
-    precio: entero(body.precio_hora, { min: 5000, max: 5_000_000, campo: 'precio por hora (mínimo $5.000)' }),
-    duracion: entero(body.duracion_min ?? 60, { min: 15, max: 480, campo: 'duración' }),
-    mod: modalidad(body.modalidad),
-    ciudad: ciudad(body.ciudad || usuario.ciudad),
-  });
+  const leerClase = (body, usuario) => {
+    const c = {
+      titulo: texto(body.titulo, 100, { requerido: true, campo: 'título' }),
+      materia: texto(body.materia, 60, { requerido: true, campo: 'tema o materia' }),
+      nivel: texto(body.nivel, 60), descripcion: texto(body.descripcion, 1000),
+      precio: entero(body.precio_hora, { min: 5000, max: 5_000_000, campo: 'precio por hora (mínimo $5.000)' }),
+      duracion: entero(body.duracion_min ?? 60, { min: 15, max: 480, campo: 'duración' }),
+      mod: MODALIDADES.includes(body.modalidad) ? body.modalidad : falla(400, 'Modalidad no válida.'),
+      ciudad: texto(body.ciudad || usuario.ciudad, 60),
+    };
+    if (c.mod !== 'virtual' && !c.ciudad) falla(400, 'Indica la ciudad para clases presenciales.');
+    return c;
+  };
 
   ruta('POST', '/api/clases', ({ usuario, body }) => {
     exigir(usuario, 'profesor');
     const c = leerClase(body, usuario);
-    if (c.mod !== 'virtual' && !c.ciudad) falla(400, 'Indica la ciudad para clases presenciales.');
     const { lastInsertRowid } = q(`INSERT INTO clases (profesor_id, titulo, materia, nivel, descripcion, precio_hora, duracion_min, modalidad, ciudad)
       VALUES (?,?,?,?,?,?,?,?,?)`).run(usuario.id, c.titulo, c.materia, c.nivel, c.descripcion, c.precio, c.duracion, c.mod, c.ciudad);
-    return { estado: 201, datos: { clase: q('SELECT * FROM clases WHERE id = ?').get(lastInsertRowid) } };
+    return json(201, { clase: q('SELECT * FROM clases WHERE id = ?').get(lastInsertRowid) });
   });
 
   ruta('PUT', '/api/clases/(\\d+)', ({ usuario, body, params }) => {
@@ -228,61 +290,21 @@ export function crearApp(db, { seguro = false } = {}) {
 
   ruta('DELETE', '/api/clases/(\\d+)', ({ usuario, params }) => {
     exigir(usuario, 'profesor');
-    const r = q('DELETE FROM clases WHERE id = ? AND profesor_id = ?').run(params[0], usuario.id);
-    if (!r.changes) falla(404, 'Clase no encontrada.');
+    if (!q('DELETE FROM clases WHERE id = ? AND profesor_id = ?').run(params[0], usuario.id).changes) falla(404, 'Clase no encontrada.');
     return { ok: true };
   });
 
-  // --- reservas (el estudiante pide una clase; el profesor acepta o rechaza) ---
-  ruta('POST', '/api/reservas', ({ usuario, body }) => {
-    exigir(usuario, 'estudiante');
-    const clase = q('SELECT * FROM clases WHERE id = ? AND activa = 1').get(body.clase_id) ?? falla(404, 'Clase no encontrada.');
-    if (q(`SELECT 1 FROM reservas WHERE clase_id = ? AND estudiante_id = ? AND estado IN ('pendiente','aceptada')`).get(clase.id, usuario.id))
-      falla(409, 'Ya tienes una solicitud activa para esta clase.');
-    const { lastInsertRowid } = q('INSERT INTO reservas (clase_id, estudiante_id, mensaje) VALUES (?,?,?)')
-      .run(clase.id, usuario.id, texto(body.mensaje, 500));
-    return { estado: 201, datos: { reserva: { id: Number(lastInsertRowid), estado: 'pendiente' } } };
-  });
-
-  ruta('GET', '/api/reservas', ({ usuario }) => {
-    exigir(usuario);
-    const esProf = usuario.rol === 'profesor';
-    const filas = q(`SELECT r.*, c.titulo, c.materia, c.precio_hora, c.modalidad, c.profesor_id,
-        e.nombre AS estudiante_nombre, e.telefono AS estudiante_tel,
-        p.nombre AS profesor_nombre, p.telefono AS profesor_tel
-      FROM reservas r JOIN clases c ON c.id = r.clase_id
-      JOIN usuarios e ON e.id = r.estudiante_id JOIN usuarios p ON p.id = c.profesor_id
-      WHERE ${esProf ? 'c.profesor_id' : 'r.estudiante_id'} = ? ORDER BY r.id DESC`).all(usuario.id);
-    // El celular de la otra persona solo se comparte cuando la reserva fue aceptada.
-    return {
-      reservas: filas.map(({ estudiante_tel, profesor_tel, ...r }) => ({
-        ...r,
-        contacto: r.estado === 'aceptada' ? (esProf ? estudiante_tel : profesor_tel) : '',
-      })),
-    };
-  });
-
-  ruta('PUT', '/api/reservas/(\\d+)', ({ usuario, body, params }) => {
-    exigir(usuario);
-    const r = q(`SELECT r.*, c.profesor_id FROM reservas r JOIN clases c ON c.id = r.clase_id WHERE r.id = ?`).get(params[0]) ?? falla(404, 'Reserva no encontrada.');
-    const nuevo = body.estado;
-    if (usuario.id === r.profesor_id && ['aceptada', 'rechazada'].includes(nuevo) && r.estado === 'pendiente') { /* ok */ }
-    else if (usuario.id === r.estudiante_id && nuevo === 'cancelada' && ['pendiente', 'aceptada'].includes(r.estado)) { /* ok */ }
-    else falla(403, 'No puedes hacer ese cambio.');
-    q('UPDATE reservas SET estado = ? WHERE id = ?').run(nuevo, r.id);
-    return { ok: true };
-  });
-
-  // --- solicitudes (el estudiante publica lo que busca; los profesores ofrecen) ---
+  // ----- solicitudes (el estudiante publica lo que busca; los mentores ofrecen) -----
   ruta('POST', '/api/solicitudes', ({ usuario, body }) => {
     exigir(usuario, 'estudiante');
-    const mod = modalidad(body.modalidad ?? 'ambas');
-    const c = ciudad(body.ciudad || usuario.ciudad);
+    exigirSuscripcion(usuario);
+    const mod = MODALIDADES.includes(body.modalidad ?? 'ambas') ? (body.modalidad ?? 'ambas') : falla(400, 'Modalidad no válida.');
+    const c = texto(body.ciudad || usuario.ciudad, 60);
     if (mod !== 'virtual' && !c) falla(400, 'Indica tu ciudad para clases presenciales.');
     const { lastInsertRowid } = q('INSERT INTO solicitudes (estudiante_id, materia, descripcion, presupuesto, modalidad, ciudad) VALUES (?,?,?,?,?,?)')
       .run(usuario.id, texto(body.materia, 60, { requerido: true, campo: 'tema o materia' }), texto(body.descripcion, 800),
         entero(body.presupuesto, { max: 5_000_000, campo: 'presupuesto' }), mod, c);
-    return { estado: 201, datos: { id: Number(lastInsertRowid) } };
+    return json(201, { id: Number(lastInsertRowid) });
   });
 
   ruta('GET', '/api/solicitudes', ({ usuario, query }) => {
@@ -298,8 +320,9 @@ export function crearApp(db, { seguro = false } = {}) {
     const args = [];
     if (query.materia) { filtros.push('s.materia = ?'); args.push(query.materia); }
     if (query.ciudad) { filtros.push(`(s.ciudad = ? OR s.modalidad IN ('virtual','ambas'))`); args.push(query.ciudad); }
+    // Los mentores ven el grado y el tipo de colegio (no el nombre del colegio ni datos de contacto).
     const filas = q(`SELECT s.id, s.materia, s.descripcion, s.presupuesto, s.modalidad, s.ciudad, s.creado,
-        e.nombre AS estudiante_nombre, e.nivel,
+        e.nombre AS estudiante_nombre, e.nivel, e.grado, e.colegio_tipo,
         EXISTS (SELECT 1 FROM ofertas o WHERE o.solicitud_id = s.id AND o.profesor_id = ?) AS ya_ofrecido
       FROM solicitudes s JOIN usuarios e ON e.id = s.estudiante_id
       WHERE ${filtros.join(' AND ')} ORDER BY s.id DESC LIMIT 100`).all(usuario.id, ...args);
@@ -307,24 +330,25 @@ export function crearApp(db, { seguro = false } = {}) {
   });
 
   ruta('POST', '/api/solicitudes/(\\d+)/ofertas', ({ usuario, body, params }) => {
-    exigir(usuario, 'profesor');
+    exigirMentorActivo(usuario);
     q('SELECT id FROM solicitudes WHERE id = ? AND abierta = 1').get(params[0]) ?? falla(404, 'Solicitud no encontrada.');
     let claseId = null;
-    if (body.clase_id) {
-      claseId = (q('SELECT id FROM clases WHERE id = ? AND profesor_id = ?').get(body.clase_id, usuario.id) ?? falla(400, 'Esa clase no es tuya.')).id;
-    }
+    if (body.clase_id) claseId = (q('SELECT id FROM clases WHERE id = ? AND profesor_id = ?').get(body.clase_id, usuario.id) ?? falla(400, 'Esa clase no es tuya.')).id;
     const mensaje = texto(body.mensaje, 500, { requerido: true, campo: 'mensaje' });
     try { q('INSERT INTO ofertas (solicitud_id, profesor_id, clase_id, mensaje) VALUES (?,?,?,?)').run(params[0], usuario.id, claseId, mensaje); }
     catch { falla(409, 'Ya enviaste una oferta a esta solicitud.'); }
-    return { estado: 201, datos: { ok: true } };
+    return json(201, { ok: true });
   });
 
   ruta('DELETE', '/api/solicitudes/(\\d+)', ({ usuario, params }) => {
     exigir(usuario, 'estudiante');
-    const r = q('DELETE FROM solicitudes WHERE id = ? AND estudiante_id = ?').run(params[0], usuario.id);
-    if (!r.changes) falla(404, 'Solicitud no encontrada.');
+    if (!q('DELETE FROM solicitudes WHERE id = ? AND estudiante_id = ?').run(params[0], usuario.id).changes) falla(404, 'Solicitud no encontrada.');
     return { ok: true };
   });
+
+  registrarAgenda(ctx);
+  registrarSuscripcion(ctx);
+  registrarVerificacion(ctx);
 
   // ---------- despachador ----------
   return async function manejar(req, res) {
@@ -333,6 +357,7 @@ export function crearApp(db, { seguro = false } = {}) {
       const ip = req.socket.remoteAddress ?? '?';
       res.setHeader('X-Content-Type-Options', 'nosniff');
       res.setHeader('Referrer-Policy', 'same-origin');
+      res.setHeader('X-Frame-Options', 'DENY');
 
       if (url.pathname.startsWith('/api/')) {
         const r = rutas.find((x) => x.metodo === req.method && x.re.test(url.pathname));
@@ -340,14 +365,14 @@ export function crearApp(db, { seguro = false } = {}) {
           if (rutas.some((x) => x.re.test(url.pathname))) falla(405, 'Método no permitido.');
           falla(404, 'No encontrado.');
         }
-        const body = ['POST', 'PUT'].includes(req.method) ? await leerJSON(req) : {};
+        const cuerpo = ['POST', 'PUT'].includes(req.method) ? (r.binario ? await leerBinario(req, r.binario) : await leerJSON(req)) : {};
         const salida = await r.fn({
-          req, res, ip, body, params: url.pathname.match(r.re).slice(1),
+          req, res, ip, body: cuerpo, params: url.pathname.match(r.re).slice(1),
           query: Object.fromEntries(url.searchParams), usuario: usuarioActual(req),
         });
-        const { estado = 200, datos = salida } = salida?.datos !== undefined ? salida : { datos: salida };
-        res.writeHead(estado, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-        return res.end(JSON.stringify(datos));
+        const resp = salida instanceof Resp ? salida : json(200, salida);
+        res.writeHead(resp.estado, resp.headers);
+        return res.end(resp.cuerpo);
       }
 
       if (req.method !== 'GET' && req.method !== 'HEAD') falla(405, 'Método no permitido.');
@@ -356,7 +381,7 @@ export function crearApp(db, { seguro = false } = {}) {
       if (!archivo.startsWith(PUBLICO)) falla(403, 'Prohibido.');
       let datos;
       try { datos = await readFile(archivo); }
-      catch { // la app usa rutas con # así que todo lo demás es 404 real, salvo "/"
+      catch {
         if (extname(rel)) falla(404, 'No encontrado.');
         archivo = join(PUBLICO, 'index.html');
         datos = await readFile(archivo);
@@ -374,10 +399,12 @@ export function crearApp(db, { seguro = false } = {}) {
 
 // ---------- arranque ----------
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const ruta = process.env.DB_PATH ?? join(aqui, 'data', 'artia.db');
-  const db = abrirBD(ruta);
+  const rutaBD = process.env.DB_PATH ?? join(aqui, 'data', 'artia.db');
+  const db = abrirBD(rutaBD);
   if (process.argv.includes('--demo')) (await import('./demo.mjs')).sembrar(db, { hashClave });
   const puerto = Number(process.env.PORT ?? 3100);
-  createServer(crearApp(db, { seguro: process.env.NODE_ENV === 'production' }))
-    .listen(puerto, () => console.log(`Artia en http://localhost:${puerto}  (BD: ${ruta})`));
+  const config = configDesdeEnv();
+  if (config.seguro && !config.wompi) console.warn('⚠ WOMPI_PUBLIC_KEY / WOMPI_INTEGRITY_SECRET no configurados: no se podrán cobrar suscripciones.');
+  createServer(crearApp(db, config)).listen(puerto, () =>
+    console.log(`Artia en http://localhost:${puerto}  (BD: ${rutaBD}${config.wompi ? ', Wompi activo' : config.pagosSimulados ? ', pagos simulados' : ''})`));
 }

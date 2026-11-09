@@ -1,4 +1,4 @@
-// Artia — interfaz (español, COP). Rutas con hash: #/clases, #/perfil, ...
+// Artia — interfaz (español, COP). Rutas con hash: #/clases, #/agenda, #/suscripcion, ...
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
 const $aviso = document.getElementById('aviso');
@@ -8,14 +8,25 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 class Raw { constructor(s) { this.s = s; } }
 const val = (v) => (v instanceof Raw ? v.s : Array.isArray(v) ? v.map(val).join('') : esc(v));
 const html = (t, ...v) => new Raw(t.reduce((a, s, i) => a + s + (i < v.length ? val(v[i]) : ''), ''));
+const sel = (cond) => (cond ? new Raw('selected') : '');
+const chk = (cond) => (cond ? new Raw('checked') : '');
+
 const cop = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n);
 const MOD = { virtual: 'Virtual', presencial: 'Presencial', ambas: 'Virtual y presencial' };
 const ESTADO = { pendiente: 'espera', aceptada: 'ok', rechazada: 'mal', cancelada: 'mal' };
-const fecha = (s) => new Date(s.replace(' ', 'T') + 'Z').toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' });
+const ESTADO_TXT = { pendiente: 'Pendiente', aceptada: 'Confirmada', rechazada: 'Rechazada', cancelada: 'Cancelada' };
+const COLEGIO = { publico: 'Colegio público', privado: 'Colegio privado', ninguno: 'Sin colegio' };
+const fechaSQL = (s) => new Date(s.replace(' ', 'T') + 'Z').toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' });
+const diaLargo = (f) => new Date(f + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
+const hora12 = (h) => { const [H, M] = h.split(':').map(Number); return `${H % 12 || 12}:${String(M).padStart(2, '0')} ${H < 12 ? 'a. m.' : 'p. m.'}`; };
+const finHora = (h, dur) => { const t = Number(h.slice(0, 2)) * 60 + Number(h.slice(3)) + dur; return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
 const celular = (t) => `${t.slice(0, 3)} ${t.slice(3, 6)} ${t.slice(6)}`;
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+const estrellas = (p) => (p == null ? '' : html`<span class="estrellas" role="img" aria-label="${p} de 5">${'★'.repeat(Math.round(p))}${'☆'.repeat(5 - Math.round(p))}</span>`);
+const insignia = (c) => (c.verificado ? html`<span class="verif" title="Identidad y título revisados por Artia">✓ Verificado</span>` : '');
 
 let yo = null;
-let catalogo = { ciudades: [], materias: [], niveles: [] };
+let catalogo = { ciudades: [], materias: [], niveles: [], localidades: [], colegioTipos: {}, grados: [], dias: [] };
 
 async function api(metodo, ruta, cuerpo) {
   const r = await fetch(ruta, {
@@ -30,32 +41,65 @@ async function api(metodo, ruta, cuerpo) {
 function avisar(msg) {
   $aviso.textContent = msg;
   $aviso.classList.add('ver');
-  setTimeout(() => $aviso.classList.remove('ver'), 3000);
+  setTimeout(() => $aviso.classList.remove('ver'), 3200);
 }
-const pintar = (r) => { $app.innerHTML = r.s; };
-const opciones = (lista, sel = '', vacio) =>
-  html`${vacio ? html`<option value="">${vacio}</option>` : ''}${lista.map((x) => html`<option ${x === sel ? new Raw('selected') : ''}>${x}</option>`)}`;
-const optMod = (sel) => html`${Object.entries(MOD).map(([k, v]) => html`<option value="${k}" ${k === sel ? new Raw('selected') : ''}>${v}</option>`)}`;
+const opciones = (lista, actual = '', vacio) =>
+  html`${vacio ? html`<option value="">${vacio}</option>` : ''}${lista.map((x) => html`<option ${sel(x === actual)}>${x}</option>`)}`;
+const optMod = (actual) => html`${Object.entries(MOD).map(([k, v]) => html`<option value="${k}" ${sel(k === actual)}>${v}</option>`)}`;
 const datosForm = (f) => Object.fromEntries(new FormData(f));
 const fallo = (e) => html`<p class="error" role="alert">${e.message}</p>`;
 
-// ---------- barra de navegación ----------
+// ---------- avisos de cuenta (suscripción, verificación, perfil) ----------
+function perfilEstudianteIncompleto(u) {
+  return !u.ciudad || !u.colegio_tipo || (u.colegio_tipo !== 'ninguno' && !u.colegio_nombre) || (u.es_menor && (!u.acudiente_nombre || !u.acudiente_celular));
+}
+function avisosCuenta() {
+  if (!yo) return html``;
+  const items = [];
+  const s = yo.suscripcion;
+  if (yo.rol === 'profesor' && yo.verificacion_estado !== 'verificado') {
+    items.push(yo.verificacion_estado === 'pendiente'
+      ? html`Estamos revisando tu verificación. Tus clases serán públicas cuando la aprobemos.`
+      : html`Tus clases no son visibles hasta que <a href="#/verificacion">verifiques tu identidad</a>.`);
+  }
+  if (!s.activa) {
+    items.push(html`${yo.rol === 'profesor' ? 'Activa tu suscripción para publicar tus clases y recibir reservas.' : 'Activa tu suscripción para reservar clases.'} <a href="#/suscripcion">Ir a suscripción</a>`);
+  } else if (Date.parse(s.vence.replace(' ', 'T') + 'Z') - Date.now() < 5 * 86400000) {
+    items.push(html`Tu suscripción vence el ${fechaSQL(s.vence)}. <a href="#/suscripcion">Renovar</a>`);
+  }
+  if (yo.rol === 'estudiante' && perfilEstudianteIncompleto(yo)) items.push(html`Completa tu perfil (colegio y acudiente si eres menor) para poder reservar. <a href="#/perfil">Ir a mi perfil</a>`);
+  return items.length ? html`<div class="banner" role="status">${items.map((i) => html`<p>${i}</p>`)}</div>` : html``;
+}
+function pintar(r, { aviso = true } = {}) { $app.innerHTML = (aviso ? avisosCuenta().s : '') + r.s; }
+
+// ---------- navegación ----------
 function pintarNav() {
   const enlaces = [['#/clases', 'Buscar clases']];
-  if (yo?.rol === 'profesor') enlaces.push(['#/mis-clases', 'Mis clases'], ['#/solicitudes', 'Solicitudes de estudiantes'], ['#/reservas', 'Reservas']);
-  if (yo?.rol === 'estudiante') enlaces.push(['#/solicitudes', 'Lo que busco'], ['#/reservas', 'Mis reservas']);
-  if (yo) enlaces.push(['#/perfil', `Mi perfil`]);
+  if (yo?.rol === 'profesor') enlaces.push(['#/mis-clases', 'Mis clases'], ['#/horarios', 'Horarios'], ['#/agenda', 'Agenda'], ['#/solicitudes', 'Solicitudes']);
+  if (yo?.rol === 'estudiante') enlaces.push(['#/agenda', 'Mi agenda'], ['#/solicitudes', 'Lo que busco']);
+  if (yo?.es_admin) enlaces.push(['#/admin', 'Administración']);
+  if (yo) enlaces.push(['#/perfil', 'Mi cuenta']);
   const actual = location.hash || '#/';
-  $nav.innerHTML = enlaces.map(([h, t]) => `<a href="${h}" ${actual.startsWith(h) ? 'aria-current="page"' : ''}>${esc(t)}</a>`).join('') +
-    (yo ? '<button data-accion="salir">Salir</button>' : '<a href="#/ingresar">Ingresar</a><a href="#/registro" class="btn chico">Crear cuenta</a>');
+  const cuenta = ['#/perfil', '#/suscripcion', '#/verificacion'];
+  $nav.innerHTML = enlaces.map(([h, t]) => {
+    const activo = h === '#/perfil' ? cuenta.some((c) => actual.startsWith(c)) : actual.startsWith(h);
+    return `<a href="${h}" ${activo ? 'aria-current="page"' : ''}>${esc(t)}</a>`;
+  }).join('') + (yo ? '<button data-accion="salir">Salir</button>' : '<a href="#/ingresar">Ingresar</a><a href="#/registro" class="btn chico">Crear cuenta</a>');
 }
+const tabsCuenta = (actual) => html`
+  <div class="tabs" role="tablist">
+    <a href="#/perfil" class="${actual === 'perfil' ? 'activa' : ''}">Perfil</a>
+    <a href="#/suscripcion" class="${actual === 'suscripcion' ? 'activa' : ''}">Suscripción</a>
+    ${yo.rol === 'profesor' ? html`<a href="#/verificacion" class="${actual === 'verificacion' ? 'activa' : ''}">Verificación</a>` : ''}
+  </div>`;
 
-// ---------- vistas ----------
+// ---------- vistas públicas ----------
 const tarjetaClase = (c) => html`
   <article class="tarjeta">
     <span class="etiqueta">${c.materia}</span>
     <h3><a href="#/clase/${c.id}">${c.titulo}</a></h3>
-    <div class="suave">con <a href="#/profesor/${c.profesor_id}">${c.profesor_nombre}</a></div>
+    <div class="suave">con <a href="#/profesor/${c.profesor_id}">${c.profesor_nombre}</a> ${insignia(c)}</div>
+    ${c.promedio != null ? html`<div class="suave">${estrellas(c.promedio)} ${c.promedio} (${c.num_resenas})</div>` : html`<div class="suave">Aún sin reseñas</div>`}
     <div>${c.nivel ? html`<span class="etiqueta">${c.nivel}</span>` : ''}<span class="etiqueta">${MOD[c.modalidad]}${c.ciudad && c.modalidad !== 'virtual' ? ' · ' + c.ciudad : ''}</span></div>
     <div class="precio">${cop(c.precio_hora)} <span class="suave">/ hora</span></div>
   </article>`;
@@ -68,10 +112,12 @@ async function vistaInicio() {
       <p>Conecta con profesores, creadores y mentores de toda Colombia para dominar nuevas habilidades y oficios. Clases virtuales y presenciales, en pesos colombianos.</p>
       <div class="acciones">
         <a class="btn morado" href="#/clases">Encontrar una clase</a>
-        <a class="btn sec" href="${yo?.rol === 'profesor' ? '#/mis-clases' : yo ? '#/solicitudes' : '#/registro?rol=profesor'}">${yo?.rol === 'estudiante' ? 'Publicar lo que busco' : 'Conviértete en mentor'}</a>
+        ${yo?.rol === 'profesor' ? html`<a class="btn sec" href="#/mis-clases">Mis clases</a>`
+          : yo ? html`<a class="btn sec" href="#/solicitudes">Publicar lo que busco</a>`
+          : html`<a class="btn sec" href="#/registro?rol=profesor">Conviértete en mentor</a>`}
       </div>
     </section>
-    <h2>Clases recientes</h2>
+    <h2>Clases destacadas</h2>
     ${clases.length ? html`<div class="rejilla">${clases.slice(0, 6).map(tarjetaClase)}</div>` : html`<p class="vacio">Aún no hay clases publicadas. ¡Sé el primero!</p>`}`);
 }
 
@@ -93,8 +139,32 @@ async function vistaClases(params) {
 }
 
 async function vistaClase(id) {
-  const { clase: c, profesor: p } = await api('GET', `/api/clases/${id}`);
-  const puedeReservar = yo?.rol === 'estudiante';
+  const { clase: c, profesor: p, reservable } = await api('GET', `/api/clases/${id}`);
+  const esDueno = yo?.id === c.profesor_id;
+  let reserva;
+  if (!reservable) reserva = html`<p class="tarjeta suave">Esta clase no está disponible para reservas en este momento.</p>`;
+  else if (esDueno) reserva = html`<p class="tarjeta suave">Esta es tu clase. Administra tus horarios en <a href="#/horarios">Horarios</a>.</p>`;
+  else if (!yo) reserva = html`<p class="tarjeta"><a href="#/ingresar?rol=estudiante">Ingresa</a> o <a href="#/registro?rol=estudiante">crea una cuenta de estudiante</a> para reservar esta clase.</p>`;
+  else if (yo.rol !== 'estudiante') reserva = html`<p class="tarjeta suave">Solo las cuentas de estudiante pueden reservar clases.</p>`;
+  else if (!yo.suscripcion.activa) reserva = html`<p class="tarjeta">Para reservar necesitas una suscripción activa. <a class="btn chico" href="#/suscripcion">Activar suscripción</a></p>`;
+  else if (perfilEstudianteIncompleto(yo)) reserva = html`<p class="tarjeta">Antes de reservar completa tu perfil (colegio público o privado y, si eres menor, tu acudiente). <a class="btn chico" href="#/perfil">Completar perfil</a></p>`;
+  else {
+    const { dias, duracion_min } = await api('GET', `/api/clases/${c.id}/disponibilidad`);
+    reserva = html`
+      <form class="tarjeta campos" data-form="reservar" data-id="${c.id}">
+        <h2>Elige tu horario</h2>
+        <div id="error"></div>
+        <p class="suave">Clases de ${duracion_min} minutos · Hora de Colombia (GMT-5)</p>
+        ${dias.length ? dias.map((d) => html`
+          <fieldset class="dia"><legend>${cap(diaLargo(d.fecha))}</legend>
+            <div class="slots">${d.horas.map((h) => html`<label class="slot"><input type="radio" name="slot" value="${d.fecha}|${h}" required><span>${hora12(h)}</span></label>`)}</div>
+          </fieldset>`) : html`<p class="vacio">El mentor no tiene horarios libres en los próximos días. Prueba más tarde o <a href="#/solicitudes">publica lo que buscas</a>.</p>`}
+        ${dias.length ? html`
+          <label>Mensaje para el mentor (opcional)<textarea name="mensaje" maxlength="500" placeholder="Cuéntale tu nivel y qué quieres trabajar"></textarea></label>
+          <button class="btn">Solicitar clase</button>
+          <p class="suave">El mentor confirmará tu reserva. Cuando la acepte, verás su WhatsApp para coordinar.</p>` : ''}
+      </form>`;
+  }
   pintar(html`
     <p><a href="#/clases">← Volver a las clases</a></p>
     <article class="tarjeta">
@@ -102,56 +172,67 @@ async function vistaClase(id) {
       <h1>${c.titulo}</h1>
       <p>${c.descripcion || 'Sin descripción.'}</p>
       <p><b>${cop(c.precio_hora)}</b> por hora · ${c.duracion_min} min por sesión · ${MOD[c.modalidad]}${c.ciudad && c.modalidad !== 'virtual' ? ' en ' + c.ciudad : ''}</p>
-      <p>Profesor: <a href="#/profesor/${p.id}">${p.nombre}</a>${p.ciudad ? ' · ' + p.ciudad : ''}</p>
+      <p>Mentor: <a href="#/profesor/${p.id}">${p.nombre}</a> ${insignia(p)}${p.promedio != null ? html` · ${estrellas(p.promedio)} ${p.promedio} (${p.num_resenas})` : ''}${p.ciudad ? ' · ' + p.ciudad : ''}</p>
     </article>
-    ${puedeReservar ? html`
-      <form class="tarjeta campos" data-form="reservar" data-id="${c.id}">
-        <h2>Solicitar esta clase</h2>
-        <label>Mensaje para el profesor (opcional)<textarea name="mensaje" maxlength="500" placeholder="Cuéntale tu nivel y qué horarios te sirven"></textarea></label>
-        <button class="btn">Enviar solicitud</button>
-        <p class="suave">Cuando el profesor acepte, ambos verán el celular del otro para coordinar por WhatsApp.</p>
-      </form>`
-      : yo ? html`<p class="suave">Solo las cuentas de estudiante pueden solicitar clases.</p>`
-      : html`<p class="tarjeta"><a href="#/ingresar">Ingresa</a> o <a href="#/registro?rol=estudiante">crea una cuenta de estudiante</a> para solicitar esta clase.</p>`}`);
+    ${reserva}`);
 }
 
 async function vistaProfesor(id) {
-  const { profesor: p, clases } = await api('GET', `/api/profesores/${id}`);
+  const { profesor: p, clases, resenas } = await api('GET', `/api/profesores/${id}`);
   pintar(html`
     <article class="tarjeta">
-      <h1>${p.nombre}</h1>
+      <h1>${p.nombre} ${insignia(p)}</h1>
       <p class="suave">${p.ciudad || 'Colombia'} · ${MOD[p.modalidad]}${p.tarifa ? ' · desde ' + cop(p.tarifa) + ' / hora' : ''}</p>
+      <p>${p.promedio != null ? html`${estrellas(p.promedio)} <b>${p.promedio}</b> · ${p.num_resenas} ${p.num_resenas === 1 ? 'reseña' : 'reseñas'}` : 'Aún sin reseñas'}</p>
       <p>${p.bio || ''}</p>
       ${p.materias ? html`<p>${p.materias.split(', ').map((m) => html`<span class="etiqueta">${m}</span>`)}</p>` : ''}
       ${p.experiencia ? html`<p><b>Experiencia:</b> ${p.experiencia}</p>` : ''}
     </article>
     <h2>Clases de ${p.nombre.split(' ')[0]}</h2>
-    ${clases.length ? html`<div class="rejilla">${clases.map((c) => tarjetaClase({ ...c, profesor_nombre: p.nombre }))}</div>` : html`<p class="vacio">Todavía no tiene clases publicadas.</p>`}`);
+    ${clases.length ? html`<div class="rejilla">${clases.map((c) => tarjetaClase({ ...c, profesor_nombre: p.nombre }))}</div>` : html`<p class="vacio">No tiene clases disponibles por ahora.</p>`}
+    <h2 style="margin-top:2rem">Reseñas</h2>
+    ${resenas.length ? resenas.map((r) => html`
+      <article class="tarjeta"><div>${estrellas(r.calificacion)} <b>${r.autor}</b> <span class="suave">· ${fechaSQL(r.creado)}</span></div>
+        ${r.comentario ? html`<p>${r.comentario}</p>` : ''}</article>`) : html`<p class="vacio">Todavía no hay reseñas. Las dejan los estudiantes después de cada clase.</p>`}`);
 }
 
+// ---------- acceso (estudiante / mentor) ----------
 function vistaAcceso(modo, params) {
   const reg = modo === 'registro';
-  const rol = params.get('rol') || 'estudiante';
+  const rol = params.get('rol') === 'profesor' ? 'profesor' : 'estudiante';
+  const esMentor = rol === 'profesor';
   pintar(html`
-    <form class="tarjeta campos" data-form="${modo}" style="max-width:460px;margin:0 auto">
-      <h1>${reg ? 'Crear cuenta' : 'Ingresar'}</h1>
-      <div id="error"></div>
-      ${reg ? html`
-        <label>Quiero…<select name="rol">
-          <option value="estudiante" ${rol === 'estudiante' ? new Raw('selected') : ''}>Buscar clases (estudiante)</option>
-          <option value="profesor" ${rol === 'profesor' ? new Raw('selected') : ''}>Dar clases (profesor)</option></select></label>
-        <label>Nombre completo<input name="nombre" required maxlength="80" autocomplete="name"></label>` : ''}
-      <label>Correo electrónico<input name="email" type="email" required autocomplete="email"></label>
-      <label>Contraseña${reg ? ' (mínimo 8 caracteres)' : ''}<input name="password" type="password" required minlength="${reg ? 8 : 1}" autocomplete="${reg ? 'new-password' : 'current-password'}"></label>
-      <button class="btn">${reg ? 'Crear cuenta' : 'Ingresar'}</button>
-      <p class="suave">${reg ? html`¿Ya tienes cuenta? <a href="#/ingresar">Ingresa</a>` : html`¿Nuevo aquí? <a href="#/registro">Crea tu cuenta</a>`}</p>
-    </form>`);
+    <div class="acceso">
+      <div class="tabs" role="tablist" aria-label="Tipo de cuenta">
+        <a href="#/${modo}?rol=estudiante" class="${esMentor ? '' : 'activa'}" role="tab" aria-selected="${!esMentor}">Soy estudiante</a>
+        <a href="#/${modo}?rol=profesor" class="${esMentor ? 'activa' : ''}" role="tab" aria-selected="${esMentor}">Soy mentor</a>
+      </div>
+      <form class="tarjeta campos" data-form="${modo}">
+        <h1>${reg ? (esMentor ? 'Crea tu cuenta de mentor' : 'Crea tu cuenta de estudiante') : (esMentor ? 'Ingresa como mentor' : 'Ingresa como estudiante')}</h1>
+        <p class="suave">${esMentor ? 'Publica tus clases, define tus horarios y recibe estudiantes de toda Colombia.' : 'Encuentra mentores verificados y reserva clases en el horario que te sirva.'}</p>
+        <div id="error"></div>
+        <input type="hidden" name="rol" value="${rol}">
+        ${reg ? html`<label>Nombre completo<input name="nombre" required maxlength="80" autocomplete="name"></label>` : ''}
+        <label>Correo electrónico<input name="email" type="email" required autocomplete="email"></label>
+        <label>Contraseña${reg ? ' (mínimo 8 caracteres)' : ''}<input name="password" type="password" required minlength="${reg ? 8 : 1}" autocomplete="${reg ? 'new-password' : 'current-password'}"></label>
+        ${reg && !esMentor ? html`
+          <fieldset class="opciones"><legend>¿Tu colegio es público o privado? (Bogotá)</legend>
+            ${Object.entries(catalogo.colegioTipos).map(([k, v]) => html`<label class="opcion"><input type="radio" name="colegio_tipo" value="${k}" required> ${v}</label>`)}
+          </fieldset>
+          <label class="opcion"><input type="checkbox" name="es_menor"> Soy menor de 18 años (un acudiente deberá registrarse en mi perfil)</label>` : ''}
+        ${reg && esMentor ? html`<p class="suave">Después de crear tu cuenta deberás verificar tu identidad (cédula y título) para que tus clases sean públicas.</p>` : ''}
+        <button class="btn">${reg ? 'Crear cuenta' : 'Ingresar'}</button>
+        <p class="suave">${reg ? html`¿Ya tienes cuenta? <a href="#/ingresar?rol=${rol}">Ingresa</a>` : html`¿Nuevo aquí? <a href="#/registro?rol=${rol}">Crea tu cuenta</a>`}</p>
+      </form>
+    </div>`, { aviso: false });
 }
 
+// ---------- perfil ----------
 function vistaPerfil() {
   const esProf = yo.rol === 'profesor';
   pintar(html`
-    <h1>Mi perfil de ${esProf ? 'profesor' : 'estudiante'}</h1>
+    ${tabsCuenta('perfil')}
+    <h1>Mi perfil de ${esProf ? 'mentor' : 'estudiante'} ${esProf ? insignia(yo) : ''}</h1>
     <form class="tarjeta campos" data-form="perfil">
       <div id="error"></div>
       <div class="fila">
@@ -170,17 +251,113 @@ function vistaPerfil() {
           <label>Valor por hora (COP)<input name="tarifa" type="number" min="0" step="1000" value="${yo.tarifa}"></label>
           <label>Modalidad<select name="modalidad">${optMod(yo.modalidad)}</select></label>
         </div>
-        <label>Experiencia y estudios<textarea name="experiencia" maxlength="600">${yo.experiencia}</textarea></label>`
+        <label>Experiencia y estudios<textarea name="experiencia" maxlength="600">${yo.experiencia}</textarea></label>
+        <input type="hidden" name="documento" value="${yo.documento}">`
       : html`
         <div class="fila">
           <label>Nivel educativo<select name="nivel">${opciones(catalogo.niveles, yo.nivel, 'Selecciona')}</select></label>
-          <label>Me interesa aprender<input name="intereses" value="${yo.intereses}" placeholder="Matemáticas, Inglés"></label>
-        </div>`}
+          <label>Grado<select name="grado">${opciones(catalogo.grados, yo.grado, 'Selecciona')}</select></label>
+        </div>
+        <label>Me interesa aprender<input name="intereses" value="${yo.intereses}" placeholder="Matemáticas, Inglés"></label>
+        <fieldset class="opciones"><legend>Tu colegio</legend>
+          ${Object.entries(catalogo.colegioTipos).map(([k, v]) => html`<label class="opcion"><input type="radio" name="colegio_tipo" value="${k}" ${chk(yo.colegio_tipo === k)} required> ${v}</label>`)}
+        </fieldset>
+        <div class="fila" data-grupo="colegio">
+          <label>Nombre del colegio<input name="colegio_nombre" maxlength="100" value="${yo.colegio_nombre}"></label>
+          <label data-grupo="localidad">Localidad de Bogotá<select name="localidad">${opciones(catalogo.localidades, yo.localidad, 'Selecciona')}</select></label>
+        </div>
+        <label class="opcion"><input type="checkbox" name="es_menor" ${chk(yo.es_menor)}> Soy menor de 18 años</label>
+        <div class="fila" data-grupo="acudiente">
+          <label>Nombre de tu acudiente<input name="acudiente_nombre" maxlength="80" value="${yo.acudiente_nombre}"></label>
+          <label>Celular del acudiente<input name="acudiente_celular" inputmode="tel" placeholder="311 555 0000" value="${yo.acudiente_celular ? celular(yo.acudiente_celular) : ''}"></label>
+        </div>
+        <p class="suave">Los mentores solo ven tu grado y si tu colegio es público o privado, nunca el nombre del colegio. Si eres menor, comparten el contacto de tu acudiente, no el tuyo.</p>`}
       <p class="suave">Tu celular solo se comparte con la otra persona cuando una reserva es aceptada.</p>
       <button class="btn">Guardar perfil</button>
-    </form>`);
+    </form>`, { aviso: true });
+  const f = $app.querySelector('form[data-form=perfil]');
+  if (f && !esProf) sincronizarPerfil(f);
+}
+function sincronizarPerfil(f) {
+  const tipo = f.querySelector('[name=colegio_tipo]:checked')?.value ?? '';
+  const conColegio = tipo === 'publico' || tipo === 'privado';
+  const bogota = f.ciudad.value === 'Bogotá D.C.';
+  f.querySelector('[data-grupo=colegio]').hidden = !conColegio;
+  f.querySelector('[data-grupo=localidad]').hidden = !bogota;
+  f.colegio_nombre.required = conColegio;
+  const menor = f.es_menor.checked;
+  f.querySelector('[data-grupo=acudiente]').hidden = !menor;
+  f.acudiente_nombre.required = menor;
+  f.acudiente_celular.required = menor;
 }
 
+// ---------- suscripción ----------
+async function vistaSuscripcion(params) {
+  const { suscripcion: s, modo, pagos } = await api('GET', '/api/suscripcion');
+  const resultado = { ok: ['ok', '¡Pago aprobado! Tu suscripción está activa.'], pendiente: ['espera', 'Tu pago está en proceso. Se activará en cuanto el banco lo confirme.'], fallo: ['mal', 'El pago no se completó. Puedes intentarlo de nuevo.'] }[params.get('pago')];
+  pintar(html`
+    ${tabsCuenta('suscripcion')}
+    <h1>Suscripción</h1>
+    ${resultado ? html`<p class="banner ${resultado[0]}" role="status">${resultado[1]}</p>` : ''}
+    <article class="tarjeta plan">
+      <span class="etiqueta ${s.activa ? 'ok' : 'mal'}">${s.activa ? 'Activa' : 'Inactiva'}</span>
+      <h2>Plan ${s.plan}</h2>
+      <p class="precio-plan">${cop(s.precio)} <span class="suave">/ mes</span></p>
+      <ul class="beneficios">
+        ${yo.rol === 'profesor'
+          ? html`<li>Tus clases visibles para estudiantes de toda Colombia</li><li>Agenda con reservas por horario</li><li>Insignia de mentor verificado</li><li>Respuesta a solicitudes de estudiantes</li>`
+          : html`<li>Reserva clases con mentores verificados</li><li>Agenda de tus clases en un solo lugar</li><li>Publica lo que buscas y recibe ofertas</li><li>Deja reseñas de tus mentores</li>`}
+      </ul>
+      ${s.activa ? html`<p>Vigente hasta el <b>${fechaSQL(s.vence)}</b>. Si renuevas ahora, se suman 30 días a tu fecha de vencimiento.</p>` : ''}
+      <div id="error"></div>
+      ${modo === 'ninguno' ? html`<p class="error">Los pagos aún no están disponibles. Intenta más tarde.</p>`
+        : html`<button class="btn" data-accion="pagar">${s.activa ? 'Renovar' : 'Pagar'} ${cop(s.precio)}</button>`}
+      <p class="suave">${modo === 'simulado' ? 'Modo de pruebas: no se cobra dinero real.' : 'Pago seguro con Wompi (PSE, Nequi y tarjetas). Cada pago cubre 30 días; recuerda renovarlo antes de que venza.'}</p>
+    </article>
+    <h2>Historial de pagos</h2>
+    ${pagos.length ? html`<div class="tarjeta"><table class="tabla"><thead><tr><th>Fecha</th><th>Valor</th><th>Estado</th></tr></thead><tbody>
+      ${pagos.map((p) => html`<tr><td>${fechaSQL(p.creado)}</td><td>${cop(p.monto_cop)}</td><td><span class="etiqueta ${p.estado === 'aprobado' ? 'ok' : p.estado === 'pendiente' ? 'espera' : 'mal'}">${p.estado}</span></td></tr>`)}
+    </tbody></table></div>` : html`<p class="vacio">Aún no tienes pagos.</p>`}`, { aviso: false });
+}
+
+// ---------- verificación del mentor ----------
+async function vistaVerificacion() {
+  const v = await api('GET', '/api/verificacion');
+  const doc = (t) => v.documentos.find((d) => d.tipo === t);
+  const editable = ['sin_enviar', 'rechazado'].includes(v.estado);
+  const ESTADOS = { sin_enviar: ['mal', 'Sin enviar'], pendiente: ['espera', 'En revisión'], verificado: ['ok', 'Verificado'], rechazado: ['mal', 'Rechazado'] };
+  const paso = (tipo, titulo, ayuda) => html`
+    <div class="paso">
+      <b>${titulo}</b> ${doc(tipo) ? html`<span class="etiqueta ok">Cargado</span>` : html`<span class="etiqueta espera">Falta</span>`}
+      <p class="suave">${ayuda}</p>
+      ${editable ? html`<input type="file" data-doc="${tipo}" accept="image/png,image/jpeg,application/pdf" aria-label="Subir ${titulo}">` : ''}
+    </div>`;
+  pintar(html`
+    ${tabsCuenta('verificacion')}
+    <h1>Verificación de mentor</h1>
+    <article class="tarjeta">
+      <p>Estado: <span class="etiqueta ${ESTADOS[v.estado][0]}">${ESTADOS[v.estado][1]}</span></p>
+      ${v.estado === 'rechazado' && v.nota ? html`<p class="error">Motivo: ${v.nota}. Corrige y vuelve a enviar.</p>` : ''}
+      ${v.estado === 'pendiente' ? html`<p>Recibimos tus documentos. Un administrador los revisará pronto.</p>` : ''}
+      ${v.estado === 'verificado' ? html`<p>Tu identidad y tu título fueron revisados. Tus clases muestran la insignia <span class="verif">✓ Verificado</span>.</p>` : ''}
+    </article>
+    ${editable || v.estado === 'pendiente' ? html`
+    <form class="tarjeta campos" data-form="documento">
+      <h2>1. Número de cédula</h2>
+      <div id="error"></div>
+      <label>Cédula de ciudadanía<input name="documento" inputmode="numeric" placeholder="52.123.456" value="${v.documento}" ${editable ? '' : new Raw('disabled')}></label>
+      ${editable ? html`<button class="btn sec chico">Guardar cédula</button>` : ''}
+    </form>
+    <section class="tarjeta campos">
+      <h2>2. Documentos</h2>
+      ${paso('cedula', 'Foto de tu cédula (por ambos lados)', 'JPG, PNG o PDF, máximo 4 MB. Debe verse completa y legible.')}
+      ${paso('titulo', 'Título, diploma o certificado', 'Del estudio o experiencia que respalda lo que enseñas (JPG, PNG o PDF, máximo 4 MB).')}
+      ${editable ? html`<button class="btn" data-accion="enviar-verificacion" ${v.completo ? '' : new Raw('disabled')}>Enviar a revisión</button>
+        <p class="suave">Solo el equipo de Artia ve tus documentos. No se muestran en tu perfil público.</p>` : ''}
+    </section>` : ''}`, { aviso: false });
+}
+
+// ---------- mentor: clases y horarios ----------
 async function vistaMisClases(editarId) {
   const { clases } = await api('GET', '/api/clases/mias');
   const c = clases.find((x) => x.id === Number(editarId)) ?? { modalidad: yo.modalidad, ciudad: yo.ciudad, duracion_min: 60, precio_hora: yo.tarifa || '', activa: 1 };
@@ -188,8 +365,8 @@ async function vistaMisClases(editarId) {
     <h1>Mis clases</h1>
     ${clases.length ? clases.map((x) => html`
       <article class="tarjeta">
-        <b>${x.titulo}</b> ${x.activa ? '' : html`<span class="etiqueta mal">Pausada</span>`}
-        <div class="suave">${x.materia} · ${cop(x.precio_hora)} / hora · ${MOD[x.modalidad]}</div>
+        <b>${x.titulo}</b> ${!x.activa ? html`<span class="etiqueta mal">Pausada</span>` : x.oculta_por ? html`<span class="etiqueta espera">Oculta: ${x.oculta_por}</span>` : html`<span class="etiqueta ok">Visible</span>`}
+        <div class="suave">${x.materia} · ${cop(x.precio_hora)} / hora · ${x.duracion_min} min · ${MOD[x.modalidad]}</div>
         <div class="acciones-fila">
           <a class="btn sec chico" href="#/mis-clases/${x.id}">Editar</a>
           <button class="btn peligro chico" data-accion="borrar-clase" data-id="${x.id}">Eliminar</button>
@@ -212,11 +389,45 @@ async function vistaMisClases(editarId) {
         <label>Modalidad<select name="modalidad">${optMod(c.modalidad)}</select></label>
         <label>Ciudad (para presencial)<select name="ciudad">${opciones(catalogo.ciudades, c.ciudad, 'Solo virtual')}</select></label>
       </div>
-      ${c.id ? html`<label><span><input type="checkbox" name="activa" style="width:auto" ${c.activa ? new Raw('checked') : ''}> Clase visible para estudiantes</span></label>` : ''}
+      ${c.id ? html`<label class="opcion"><input type="checkbox" name="activa" ${chk(c.activa)}> Clase visible para estudiantes</label>` : ''}
       <div class="acciones-fila"><button class="btn">${c.id ? 'Guardar cambios' : 'Publicar clase'}</button>${c.id ? html`<a class="btn sec" href="#/mis-clases">Cancelar</a>` : ''}</div>
     </form>`);
 }
 
+let bloques = [];
+function leerBloques() {
+  const f = $app.querySelector('form[data-form=horarios]');
+  if (!f) return bloques;
+  bloques = [...f.querySelectorAll('[data-bloque]')].map((r) => ({ dia: Number(r.dataset.dia), inicio: r.querySelector('[name=inicio]').value, fin: r.querySelector('[name=fin]').value }));
+  return bloques;
+}
+function pintarHorarios() {
+  pintar(html`
+    <h1>Mis horarios</h1>
+    <p class="suave">Define en qué horas puedes dar clase cada semana (hora de Colombia). Los estudiantes reservarán dentro de estos bloques, en espacios de la duración de cada clase.</p>
+    <form class="tarjeta campos" data-form="horarios">
+      <div id="error"></div>
+      ${catalogo.dias.map((nombre, dia) => {
+        const del = bloques.map((b, i) => ({ ...b, i })).filter((b) => b.dia === dia);
+        return html`<fieldset class="dia"><legend>${nombre}</legend>
+          ${del.length ? '' : html`<p class="suave">Sin disponibilidad</p>`}
+          ${del.map((b) => html`<div class="bloque" data-bloque data-dia="${dia}">
+            <label>Desde<input type="time" name="inicio" value="${b.inicio}" required></label>
+            <label>Hasta<input type="time" name="fin" value="${b.fin}" required></label>
+            <button type="button" class="btn peligro chico" data-accion="quitar-bloque" data-i="${b.i}" aria-label="Quitar bloque del ${nombre}">Quitar</button>
+          </div>`)}
+          <button type="button" class="btn sec chico" data-accion="agregar-bloque" data-dia="${dia}">+ Agregar bloque</button>
+        </fieldset>`;
+      })}
+      <button class="btn">Guardar horarios</button>
+    </form>`);
+}
+async function vistaHorarios() {
+  bloques = (await api('GET', '/api/horarios')).horarios;
+  pintarHorarios();
+}
+
+// ---------- solicitudes ----------
 async function vistaSolicitudes() {
   const { solicitudes } = await api('GET', '/api/solicitudes');
   if (yo.rol === 'profesor') {
@@ -227,7 +438,7 @@ async function vistaSolicitudes() {
         <article class="tarjeta">
           <span class="etiqueta">${s.materia}</span><span class="etiqueta">${MOD[s.modalidad]}${s.ciudad ? ' · ' + s.ciudad : ''}</span>
           <p>${s.descripcion || 'Sin detalles.'}</p>
-          <p class="suave">${s.estudiante_nombre}${s.nivel ? ' · ' + s.nivel : ''} · Presupuesto: ${s.presupuesto ? cop(s.presupuesto) + ' / hora' : 'a convenir'} · ${fecha(s.creado)}</p>
+          <p class="suave">${s.estudiante_nombre}${s.grado ? ' · ' + s.grado : ''}${s.colegio_tipo && s.colegio_tipo !== 'ninguno' ? ' · ' + COLEGIO[s.colegio_tipo] : ''} · Presupuesto: ${s.presupuesto ? cop(s.presupuesto) + ' / hora' : 'a convenir'} · ${fechaSQL(s.creado)}</p>
           ${s.ya_ofrecido ? html`<span class="etiqueta ok">Ya enviaste una oferta</span>` : html`
           <form class="campos" data-form="oferta" data-id="${s.id}">
             <label>Tu mensaje<textarea name="mensaje" required maxlength="500" placeholder="Hola, puedo ayudarte con esto. Mi experiencia es…"></textarea></label>
@@ -257,33 +468,83 @@ async function vistaSolicitudes() {
       <article class="tarjeta">
         <span class="etiqueta">${s.materia}</span><span class="etiqueta">${MOD[s.modalidad]}</span>
         <p>${s.descripcion}</p>
-        <h3>Ofertas de profesores (${s.ofertas.length})</h3>
+        <h3>Ofertas de mentores (${s.ofertas.length})</h3>
         ${s.ofertas.map((o) => html`<p><a href="#/profesor/${o.profesor_id}"><b>${o.profesor_nombre}</b></a>: ${o.mensaje}
           ${o.clase_titulo ? html`<br><a href="#/clase/${o.clase_id}">Ver clase: ${o.clase_titulo}</a>` : ''}</p>`)}
         <button class="btn peligro chico" data-accion="borrar-solicitud" data-id="${s.id}">Eliminar solicitud</button>
       </article>`) : html`<p class="vacio">Aún no has publicado solicitudes.</p>`}`);
 }
 
-async function vistaReservas() {
-  const { reservas } = await api('GET', '/api/reservas');
-  const esProf = yo.rol === 'profesor';
-  pintar(html`
-    <h1>${esProf ? 'Reservas recibidas' : 'Mis reservas'}</h1>
-    ${reservas.length ? reservas.map((r) => html`
-      <article class="tarjeta">
-        <span class="etiqueta ${ESTADO[r.estado]}">${r.estado}</span>
+// ---------- agenda (reservas de ambos roles) ----------
+function tarjetaReserva(r, esProf) {
+  const otro = esProf ? r.estudiante_nombre : r.profesor_nombre;
+  return html`
+    <article class="tarjeta reserva">
+      <div class="hora"><b>${hora12(r.hora)}</b><span class="suave">a ${hora12(finHora(r.hora, r.duracion_min))}</span></div>
+      <div class="detalle">
+        <span class="etiqueta ${ESTADO[r.estado]}">${ESTADO_TXT[r.estado]}</span>
         <h3><a href="#/clase/${r.clase_id}">${r.titulo}</a></h3>
-        <p class="suave">${esProf ? 'Estudiante: ' + r.estudiante_nombre : 'Profesor: ' + r.profesor_nombre} · ${cop(r.precio_hora)} / hora · ${fecha(r.creado)}</p>
+        <p class="suave">${esProf ? 'Estudiante' : 'Mentor'}: ${esProf ? otro : html`<a href="#/profesor/${r.profesor_id}">${otro}</a>`}
+          ${esProf && r.estudiante_grado ? ' · ' + r.estudiante_grado : ''}${esProf && r.estudiante_colegio_tipo && r.estudiante_colegio_tipo !== 'ninguno' ? ' · ' + COLEGIO[r.estudiante_colegio_tipo] : ''}
+          · ${MOD[r.modalidad]} · ${cop(r.precio_hora)} / hora</p>
         ${r.mensaje ? html`<p>“${r.mensaje}”</p>` : ''}
-        ${r.contacto ? html`<p>Contacto: <a href="https://wa.me/57${r.contacto}" target="_blank" rel="noopener">WhatsApp ${celular(r.contacto)}</a></p>`
+        ${r.contacto ? html`<p>Contacto con ${r.contacto_de}: <a href="https://wa.me/57${r.contacto}" target="_blank" rel="noopener">WhatsApp ${celular(r.contacto)}</a></p>`
           : r.estado === 'aceptada' ? html`<p class="suave">La otra persona aún no tiene celular en su perfil.</p>` : ''}
+        ${r.resena ? html`<p>${esProf ? 'Reseña del estudiante' : 'Tu reseña'}: ${estrellas(r.resena.calificacion)} ${r.resena.comentario}</p>` : ''}
         <div class="acciones-fila">
-          ${esProf && r.estado === 'pendiente' ? html`
+          ${esProf && r.estado === 'pendiente' && !r.terminada ? html`
             <button class="btn chico" data-accion="reserva" data-id="${r.id}" data-estado="aceptada">Aceptar</button>
             <button class="btn peligro chico" data-accion="reserva" data-id="${r.id}" data-estado="rechazada">Rechazar</button>` : ''}
-          ${!esProf && ['pendiente', 'aceptada'].includes(r.estado) ? html`<button class="btn peligro chico" data-accion="reserva" data-id="${r.id}" data-estado="cancelada">Cancelar</button>` : ''}
+          ${['pendiente', 'aceptada'].includes(r.estado) && !r.terminada && !(esProf && r.estado === 'pendiente') ? html`<button class="btn peligro chico" data-accion="reserva" data-id="${r.id}" data-estado="cancelada">Cancelar</button>` : ''}
+          ${!esProf && r.estado === 'pendiente' && !r.terminada ? html`<button class="btn peligro chico" data-accion="reserva" data-id="${r.id}" data-estado="cancelada">Cancelar</button>` : ''}
         </div>
-      </article>`) : html`<p class="vacio">Todavía no hay reservas.</p>`}`);
+        ${r.puede_resenar ? html`
+          <form class="campos resena" data-form="resena" data-id="${r.id}">
+            <b>¿Cómo fue tu clase?</b>
+            <label>Calificación<select name="calificacion" required>
+              <option value="">Selecciona</option>
+              ${[5, 4, 3, 2, 1].map((n) => html`<option value="${n}">${'★'.repeat(n)}${'☆'.repeat(5 - n)} — ${['', 'Muy mala', 'Mala', 'Regular', 'Buena', 'Excelente'][n]}</option>`)}
+            </select></label>
+            <label>Comentario (opcional)<textarea name="comentario" maxlength="500" placeholder="Cuéntales a otros estudiantes cómo te fue"></textarea></label>
+            <button class="btn chico">Publicar reseña</button>
+          </form>` : ''}
+      </div>
+    </article>`;
+}
+async function vistaAgenda() {
+  const { reservas } = await api('GET', '/api/reservas');
+  const esProf = yo.rol === 'profesor';
+  const proximas = reservas.filter((r) => !r.terminada && ['pendiente', 'aceptada'].includes(r.estado)).sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
+  const historial = reservas.filter((r) => !proximas.includes(r));
+  const porDia = (lista) => [...new Set(lista.map((r) => r.fecha))].map((f) => html`
+    <section><h3 class="dia-titulo">${cap(diaLargo(f))}</h3>${lista.filter((r) => r.fecha === f).map((r) => tarjetaReserva(r, esProf))}</section>`);
+  const porRevisar = esProf ? proximas.filter((r) => r.estado === 'pendiente').length : 0;
+  pintar(html`
+    <h1>${esProf ? 'Mi agenda' : 'Mi agenda de clases'}</h1>
+    ${porRevisar ? html`<p class="banner espera">Tienes ${porRevisar} ${porRevisar === 1 ? 'solicitud pendiente' : 'solicitudes pendientes'} por responder.</p>` : ''}
+    <h2>Próximas clases</h2>
+    ${proximas.length ? porDia(proximas) : html`<p class="vacio">No tienes clases próximas. ${esProf ? 'Cuando un estudiante reserve, aparecerá aquí.' : html`<a href="#/clases">Busca una clase</a> y reserva tu horario.`}</p>`}
+    ${historial.length ? html`<h2 style="margin-top:2rem">Historial</h2>${porDia(historial)}` : ''}`);
+}
+
+// ---------- administración ----------
+async function vistaAdmin(estado = 'pendiente') {
+  const { mentores } = await api('GET', `/api/admin/verificaciones?estado=${estado}`);
+  const T = { pendiente: 'Pendientes', verificado: 'Verificados', rechazado: 'Rechazados' };
+  const NOMBRE_DOC = { cedula: 'Cédula', titulo: 'Título / certificado' };
+  pintar(html`
+    <h1>Verificación de mentores</h1>
+    <div class="tabs">${Object.entries(T).map(([k, v]) => html`<a href="#/admin/${k}" class="${k === estado ? 'activa' : ''}">${v}</a>`)}</div>
+    ${mentores.length ? mentores.map((m) => html`
+      <article class="tarjeta">
+        <h3>${m.nombre}</h3>
+        <p class="suave">${m.email} · ${m.ciudad || 'sin ciudad'} · Cédula: <b>${m.documento || '—'}</b> · Celular: ${m.telefono ? celular(m.telefono) : '—'}</p>
+        <p><b>Materias:</b> ${m.materias || '—'}<br><b>Experiencia:</b> ${m.experiencia || '—'}</p>
+        <p>${m.documentos.map((d) => html`<a class="btn sec chico" href="/api/admin/documentos/${d.id}" target="_blank" rel="noopener">Ver ${NOMBRE_DOC[d.tipo]}</a> `)}</p>
+        ${estado === 'pendiente' ? html`<div class="acciones-fila">
+          <button class="btn chico" data-accion="aprobar" data-id="${m.id}">Aprobar</button>
+          <button class="btn peligro chico" data-accion="rechazar" data-id="${m.id}">Rechazar</button></div>` : ''}
+      </article>`) : html`<p class="vacio">No hay mentores en este estado.</p>`}`, { aviso: false });
 }
 
 // ---------- enrutador ----------
@@ -291,28 +552,34 @@ async function enrutar() {
   const [rutaTxt, qs] = (location.hash.slice(1) || '/').split('?');
   const params = new URLSearchParams(qs ?? '');
   const [, base, arg] = rutaTxt.split('/');
-  const protegida = ['perfil', 'mis-clases', 'solicitudes', 'reservas'];
+  const protegidas = ['perfil', 'suscripcion', 'verificacion', 'mis-clases', 'horarios', 'agenda', 'solicitudes', 'reservas', 'admin'];
   try {
-    if (protegida.includes(base) && !yo) { location.hash = '#/ingresar'; return; }
-    if (base === 'mis-clases' && yo.rol !== 'profesor') { location.hash = '#/'; return; }
+    if (protegidas.includes(base) && !yo) { location.hash = '#/ingresar'; return; }
+    if (['mis-clases', 'horarios', 'verificacion'].includes(base) && yo.rol !== 'profesor') { location.hash = '#/'; return; }
+    if (base === 'admin' && !yo.es_admin) { location.hash = '#/'; return; }
     pintarNav();
     switch (base) {
       case '': case undefined: await vistaInicio(); break;
       case 'clases': await vistaClases(params); break;
       case 'clase': await vistaClase(arg); break;
       case 'profesor': await vistaProfesor(arg); break;
-      case 'ingresar': vistaAcceso('login', params); break;
+      case 'ingresar': vistaAcceso('ingresar', params); break;
       case 'registro': vistaAcceso('registro', params); break;
       case 'perfil': vistaPerfil(); break;
+      case 'suscripcion': await vistaSuscripcion(params); break;
+      case 'verificacion': await vistaVerificacion(); break;
       case 'mis-clases': await vistaMisClases(arg); break;
+      case 'horarios': await vistaHorarios(); break;
       case 'solicitudes': await vistaSolicitudes(); break;
-      case 'reservas': await vistaReservas(); break;
-      default: pintar(html`<p class="vacio">Página no encontrada. <a href="#/">Ir al inicio</a></p>`);
+      case 'agenda': case 'reservas': await vistaAgenda(); break;
+      case 'admin': await vistaAdmin(arg); break;
+      default: pintar(html`<p class="vacio">Página no encontrada. <a href="#/">Ir al inicio</a></p>`, { aviso: false });
     }
-  } catch (e) { pintar(html`<p class="error" role="alert">${e.message}</p>`); }
+  } catch (e) { pintar(html`<p class="error" role="alert">${e.message}</p>`, { aviso: false }); }
   window.scrollTo(0, 0);
   $app.focus({ preventScroll: true });
 }
+async function refrescarYo() { ({ usuario: yo } = await api('GET', '/api/yo')); }
 
 // ---------- eventos ----------
 document.addEventListener('submit', async (ev) => {
@@ -321,7 +588,7 @@ document.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const d = datosForm(f);
   const boton = f.querySelector('button:not([type=button])');
-  const mostrarError = (e) => { const c = f.querySelector('#error'); if (c) c.innerHTML = fallo(e).s; else avisar(e.message); };
+  const mostrarError = (e) => { const c = f.querySelector('#error'); if (c) { c.innerHTML = fallo(e).s; c.scrollIntoView({ block: 'nearest' }); } else avisar(e.message); };
   if (boton) boton.disabled = true;
   try {
     switch (f.dataset.form) {
@@ -331,48 +598,98 @@ document.addEventListener('submit', async (ev) => {
         if (location.hash === destino) await enrutar(); else location.hash = destino;
         break;
       }
-      case 'registro': case 'login': {
-        ({ usuario: yo } = await api('POST', f.dataset.form === 'login' ? '/api/login' : '/api/registro', d));
-        avisar(f.dataset.form === 'login' ? `¡Hola de nuevo, ${yo.nombre.split(' ')[0]}!` : '¡Cuenta creada! Completa tu perfil.');
-        location.hash = f.dataset.form === 'login' ? '#/' : '#/perfil';
+      case 'registro': case 'ingresar': {
+        const reg = f.dataset.form === 'registro';
+        ({ usuario: yo } = await api('POST', reg ? '/api/registro' : '/api/login', { ...d, es_menor: 'es_menor' in d }));
+        avisar(reg ? '¡Cuenta creada! Completa tu perfil.' : `¡Hola de nuevo, ${yo.nombre.split(' ')[0]}!`);
+        location.hash = reg ? '#/perfil' : yo.rol === 'profesor' ? '#/agenda' : '#/clases';
         break;
       }
       case 'perfil':
-        ({ usuario: yo } = await api('PUT', '/api/perfil', d));
-        pintarNav(); avisar('Perfil guardado'); break;
+        ({ usuario: yo } = await api('PUT', '/api/perfil', { ...d, es_menor: 'es_menor' in d }));
+        avisar('Perfil guardado'); await enrutar(); break;
+      case 'documento':
+        await api('PUT', '/api/perfil', { nombre: yo.nombre, ciudad: yo.ciudad, telefono: yo.telefono, bio: yo.bio, materias: yo.materias, tarifa: yo.tarifa, modalidad: yo.modalidad, experiencia: yo.experiencia, documento: d.documento });
+        await refrescarYo(); avisar('Cédula guardada'); await enrutar(); break;
       case 'clase': {
         const id = f.dataset.id;
-        const cuerpo = { ...d, activa: id ? 'activa' in d : true };
-        await api(id ? 'PUT' : 'POST', id ? `/api/clases/${id}` : '/api/clases', cuerpo);
+        await api(id ? 'PUT' : 'POST', id ? `/api/clases/${id}` : '/api/clases', { ...d, activa: id ? 'activa' in d : true });
         avisar(id ? 'Clase actualizada' : '¡Clase publicada!');
         if (id) location.hash = '#/mis-clases'; else await enrutar();
         break;
       }
-      case 'reservar':
-        await api('POST', '/api/reservas', { clase_id: Number(f.dataset.id), mensaje: d.mensaje });
-        avisar('Solicitud enviada al profesor'); location.hash = '#/reservas'; break;
+      case 'horarios':
+        await api('PUT', '/api/horarios', { horarios: leerBloques() });
+        avisar('Horarios guardados'); break;
+      case 'reservar': {
+        const [fecha, hora] = d.slot.split('|');
+        await api('POST', '/api/reservas', { clase_id: Number(f.dataset.id), fecha, hora, mensaje: d.mensaje });
+        avisar('Solicitud enviada al mentor'); location.hash = '#/agenda'; break;
+      }
+      case 'resena':
+        await api('POST', '/api/resenas', { reserva_id: Number(f.dataset.id), calificacion: Number(d.calificacion), comentario: d.comentario });
+        avisar('¡Gracias por tu reseña!'); await enrutar(); break;
       case 'solicitud':
         await api('POST', '/api/solicitudes', d); avisar('Solicitud publicada'); await enrutar(); break;
       case 'oferta':
         await api('POST', `/api/solicitudes/${f.dataset.id}/ofertas`, { ...d, clase_id: d.clase_id ? Number(d.clase_id) : null });
         avisar('Oferta enviada'); await enrutar(); break;
     }
-  } catch (e) { mostrarError(e); if (boton) boton.disabled = false; }
+  } catch (e) {
+    mostrarError(e);
+    if (e.message.includes('suscripción') && f.dataset.form !== 'registro') avisar(e.message);
+  } finally { if (boton) boton.disabled = false; }
+});
+
+document.addEventListener('input', (ev) => { const f = ev.target.closest('form[data-form=perfil]'); if (f && yo?.rol === 'estudiante') sincronizarPerfil(f); });
+
+document.addEventListener('change', async (ev) => {
+  const input = ev.target.closest('input[data-doc]');
+  if (!input || !input.files[0]) return;
+  const archivo = input.files[0];
+  if (archivo.size > 4 * 1024 * 1024) { avisar('El archivo supera los 4 MB.'); input.value = ''; return; }
+  try {
+    const r = await fetch(`/api/verificacion/documentos?tipo=${input.dataset.doc}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: archivo });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'No se pudo subir el archivo.');
+    avisar('Documento cargado'); await enrutar();
+  } catch (e) { avisar(e.message); input.value = ''; }
 });
 
 document.addEventListener('click', async (ev) => {
   const b = ev.target.closest('[data-accion]');
   if (!b) return;
-  const { accion, id, estado } = b.dataset;
+  const { accion, id, estado, dia, i } = b.dataset;
   try {
     if (accion === 'salir') { await api('POST', '/api/logout'); yo = null; location.hash = '#/'; pintarNav(); avisar('Sesión cerrada'); return; }
     if (accion === 'borrar-clase' && confirm('¿Eliminar esta clase?')) { await api('DELETE', `/api/clases/${id}`); await enrutar(); }
     if (accion === 'borrar-solicitud' && confirm('¿Eliminar esta solicitud?')) { await api('DELETE', `/api/solicitudes/${id}`); await enrutar(); }
-    if (accion === 'reserva') { await api('PUT', `/api/reservas/${id}`, { estado }); await enrutar(); }
-  } catch (e) { avisar(e.message); }
+    if (accion === 'reserva') {
+      if (estado === 'cancelada' && !confirm('¿Cancelar esta clase?')) return;
+      await api('PUT', `/api/reservas/${id}`, { estado }); await enrutar();
+    }
+    if (accion === 'agregar-bloque') { leerBloques(); bloques.push({ dia: Number(dia), inicio: '14:00', fin: '18:00' }); pintarHorarios(); }
+    if (accion === 'quitar-bloque') { leerBloques(); bloques.splice(Number(i), 1); pintarHorarios(); }
+    if (accion === 'enviar-verificacion') { await api('POST', '/api/verificacion/enviar'); await refrescarYo(); avisar('Enviado a revisión'); await enrutar(); }
+    if (accion === 'pagar') {
+      b.disabled = true;
+      const p = await api('POST', '/api/pagos/iniciar');
+      if (p.modo === 'wompi') { location.href = p.url; return; }
+      await api('POST', '/api/pagos/simular', { pago_id: p.pago_id });
+      await refrescarYo(); avisar('Suscripción activada (modo de pruebas)'); await enrutar();
+    }
+    if (accion === 'aprobar') { await api('PUT', `/api/admin/verificaciones/${id}`, { estado: 'verificado' }); avisar('Mentor verificado'); await enrutar(); }
+    if (accion === 'rechazar') {
+      const nota = prompt('Motivo del rechazo (el mentor lo verá):');
+      if (!nota) return;
+      await api('PUT', `/api/admin/verificaciones/${id}`, { estado: 'rechazado', nota }); avisar('Verificación rechazada'); await enrutar();
+    }
+  } catch (e) { avisar(e.message); if (b) b.disabled = false; }
 });
 
-window.addEventListener('hashchange', enrutar);
+window.addEventListener('hashchange', async () => {
+  if (yo) { try { await refrescarYo(); } catch { /* sin sesión */ } }
+  enrutar();
+});
 
 (async () => {
   try {

@@ -25,6 +25,8 @@ Plataforma en español para conectar **mentores** (profesores) y **estudiantes**
 - Mentor: sus clases solo son públicas con verificación **y** suscripción activa. Estudiante: necesita suscripción activa para reservar y publicar solicitudes.
 - Pago con **Wompi** (PSE, Nequi, tarjetas). Cada pago suma 30 días; renovar antes de vencer suma desde la fecha de vencimiento.
 
+**KYC (verificación de identidad):** el mentor guarda su número de cédula, toma foto del documento y una selfie con un proveedor de KYC (**Didit**, pendiente de conectar), sube su título y termina. El resultado se compara con su perfil: número de cédula, nombre (acepta «APELLIDOS NOMBRES» y sin tildes), rostro y prueba de vida. **Si todo coincide el mentor queda verificado automáticamente** (`KYC_AUTO_APROBAR=0` lo desactiva y deja siempre la aprobación al administrador); si algo no coincide pasa al administrador con los motivos; si el proveedor rechaza el documento, el mentor puede reintentar. El título no lo valida el KYC: queda disponible para revisión del administrador. Mientras no haya proveedor conectado se usa la revisión manual de documentos.
+
 **Administración:** cola de verificaciones con vista de documentos, aprobar o rechazar con motivo.
 
 ## Ejecutar
@@ -49,6 +51,8 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 | `WOMPI_PUBLIC_KEY`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_EVENTS_SECRET` | Llaves de Wompi. Con `pub_test_…` usa el sandbox; con `pub_prod_…`, producción |
 | `PAGOS_SIMULADOS=1` | Solo desarrollo: aprueba pagos sin Wompi |
 | `PRECIO_MENTOR` (59900), `PRECIO_ESTUDIANTE` (24900) | Precio mensual en COP |
+| `KYC_AUTO_APROBAR` (1) | `0` para que el administrador apruebe siempre, aunque el KYC coincida |
+| `KYC_SIMULADO=1` | Solo desarrollo: simula los resultados del proveedor de KYC (nunca en producción) |
 | `ADMIN_EMAILS` | Correos (separados por coma) que son administradores al registrarse |
 
 ### Configurar Wompi

@@ -1,0 +1,59 @@
+// KYC (verificación de identidad) — lógica independiente del proveedor.
+//
+// Un proveedor (Didit, etc.) verifica la cédula con foto y selfie y nos devuelve un resultado normalizado:
+//   { sesionId, estado: 'aprobado'|'rechazado'|'revision'|'pendiente',
+//     numeroDocumento, nombreCompleto, rostroCoincide: bool|null, vivo: bool|null }
+// Aquí decidimos si ese resultado coincide con lo que el mentor declaró en su perfil.
+import { randomBytes } from 'node:crypto';
+import { normalizarDocumento } from './colombia.mjs';
+
+/** Minúsculas, sin tildes ni signos: «José  Núñez-Pérez» → «jose nunez perez». */
+export const normalizarNombre = (s) =>
+  String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * El nombre del perfil debe estar contenido en el del documento (en Colombia el documento trae
+ * «APELLIDOS NOMBRES», así que no importa el orden). Se exigen al menos dos palabras para evitar coincidencias débiles.
+ */
+export function coincideNombre(nombrePerfil, nombreDocumento) {
+  const perfil = normalizarNombre(nombrePerfil).split(' ').filter(Boolean);
+  const doc = new Set(normalizarNombre(nombreDocumento).split(' ').filter(Boolean));
+  return perfil.length >= 2 && perfil.every((p) => doc.has(p));
+}
+
+/** Resultado normalizado + perfil del mentor → decisión y motivos (para mostrar al administrador). */
+export function evaluarResultado(usuario, r) {
+  if (r.estado === 'pendiente') return { kyc: 'pendiente', motivos: [] };
+  if (r.estado === 'rechazado') return { kyc: 'rechazado', motivos: ['El proveedor no pudo verificar el documento.'] };
+  const motivos = [];
+  if (r.estado === 'revision') motivos.push('El proveedor marcó el caso para revisión manual.');
+  if (normalizarDocumento(r.numeroDocumento) !== usuario.documento) motivos.push('El número de cédula del documento no coincide con el declarado.');
+  if (!coincideNombre(usuario.nombre, r.nombreCompleto)) motivos.push('El nombre del documento no coincide con el del perfil (se necesitan nombre y apellido).');
+  if (r.rostroCoincide === false) motivos.push('El rostro de la selfie no coincide con la foto del documento.');
+  if (r.vivo === false) motivos.push('No se confirmó que la selfie fuera de una persona real (prueba de vida).');
+  return { kyc: motivos.length ? 'revision' : 'aprobado', motivos };
+}
+
+/** Resumen que guardamos (sin imágenes ni datos de más; solo lo necesario para auditar la decisión). */
+export const resumen = (proveedor, r, decision) => JSON.stringify({
+  proveedor, estado_proveedor: r.estado, decision: decision.kyc, motivos: decision.motivos,
+  rostro: r.rostroCoincide ?? null, vivo: r.vivo ?? null, fecha: new Date().toISOString(),
+});
+
+/**
+ * Proveedor simulado SOLO para desarrollo (KYC_SIMULADO=1, nunca en producción):
+ * permite probar los tres desenlaces sin pagar ni usar documentos reales.
+ */
+export function proveedorSimulado() {
+  return {
+    nombre: 'simulado',
+    modo: 'simulado',
+    async crearSesion() { return { sesionId: `sim-${randomBytes(6).toString('hex')}`, url: null }; },
+    /** Construye el resultado normalizado de un desenlace de prueba para el mentor dado. */
+    resultadoDePrueba(usuario, sesionId, desenlace) {
+      if (desenlace === 'rechazado') return { sesionId, estado: 'rechazado' };
+      if (desenlace === 'no_coincide') return { sesionId, estado: 'aprobado', numeroDocumento: '99999999', nombreCompleto: 'OTRA PERSONA', rostroCoincide: true, vivo: true };
+      return { sesionId, estado: 'aprobado', numeroDocumento: usuario.documento, nombreCompleto: usuario.nombre.toUpperCase(), rostroCoincide: true, vivo: true };
+    },
+  };
+}

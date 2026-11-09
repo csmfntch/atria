@@ -355,38 +355,57 @@ async function vistaSuscripcion(params) {
 }
 
 // ---------- verificación del mentor ----------
+const KYC_TXT = { '': ['espera', 'Sin iniciar'], pendiente: ['espera', 'En proceso'], aprobado: ['ok', 'Identidad confirmada'], revision: ['espera', 'Requiere revisión manual'], rechazado: ['mal', 'No se pudo verificar'] };
 async function vistaVerificacion() {
   const v = await api('GET', '/api/verificacion');
   const doc = (t) => v.documentos.find((d) => d.tipo === t);
   const editable = ['sin_enviar', 'rechazado'].includes(v.estado);
   const ESTADOS = { sin_enviar: ['mal', 'Sin enviar'], pendiente: ['espera', 'En revisión'], verificado: ['ok', 'Verificado'], rechazado: ['mal', 'Rechazado'] };
+  const conKyc = v.kyc.modo !== 'ninguno';
   const paso = (tipo, titulo, ayuda) => html`
     <div class="paso">
       <b>${titulo}</b> ${doc(tipo) ? html`<span class="etiqueta ok">Cargado</span>` : html`<span class="etiqueta espera">Falta</span>`}
       <p class="suave">${ayuda}</p>
       ${editable ? html`<input type="file" data-doc="${tipo}" accept="image/png,image/jpeg,application/pdf" aria-label="Subir ${titulo}">` : ''}
     </div>`;
+  const k = KYC_TXT[v.kyc.estado] ?? KYC_TXT[''];
   pintar(html`
     ${tabsCuenta('verificacion')}
     <h1>Verificación de mentor</h1>
     <article class="tarjeta">
       <p>Estado: <span class="etiqueta ${ESTADOS[v.estado][0]}">${ESTADOS[v.estado][1]}</span></p>
       ${v.estado === 'rechazado' && v.nota ? html`<p class="error">Motivo: ${v.nota}. Corrige y vuelve a enviar.</p>` : ''}
-      ${v.estado === 'pendiente' ? html`<p>Recibimos tus documentos. Un administrador los revisará pronto.</p>` : ''}
-      ${v.estado === 'verificado' ? html`<p>Tu identidad y tu título fueron revisados. Tus clases muestran la insignia <span class="verif">✓ Verificado</span>.</p>` : ''}
+      ${v.estado === 'pendiente' ? html`<p>Recibimos tu información. Un administrador la revisará pronto.</p>` : ''}
+      ${v.estado === 'verificado' ? html`<p>Tu identidad fue verificada. Tus clases muestran la insignia <span class="verif">✓ Verificado</span>.</p>` : ''}
     </article>
     ${editable || v.estado === 'pendiente' ? html`
     <form class="tarjeta campos" data-form="documento">
-      <h2>1. Número de cédula</h2>
+      <h2>1. Tu cédula</h2>
       <div id="error"></div>
-      <label>Cédula de ciudadanía<input name="documento" inputmode="numeric" placeholder="52.123.456" value="${v.documento}" ${editable ? '' : new Raw('disabled')}></label>
+      <label>Número de cédula de ciudadanía<input name="documento" inputmode="numeric" placeholder="52.123.456" value="${v.documento}" ${editable ? '' : new Raw('disabled')}></label>
+      ${conKyc ? html`<p class="suave">Tu nombre en <a href="#/perfil">tu perfil</a> debe ser el mismo de tu cédula: <b>${yo.nombre}</b>. Si no coincide, la verificación pasará a revisión manual.</p>` : ''}
       ${editable ? html`<button class="btn sec chico">Guardar cédula</button>` : ''}
     </form>
+    ${conKyc ? html`
     <section class="tarjeta campos">
-      <h2>2. Documentos</h2>
-      ${paso('cedula', 'Foto de tu cédula (por ambos lados)', 'JPG, PNG o PDF, máximo 4 MB. Debe verse completa y legible.')}
-      ${paso('titulo', 'Título, diploma o certificado', 'Del estudio o experiencia que respalda lo que enseñas (JPG, PNG o PDF, máximo 4 MB).')}
-      ${editable ? html`<button class="btn" data-accion="enviar-verificacion" ${v.completo ? '' : new Raw('disabled')}>Enviar a revisión</button>
+      <h2>2. Verifica tu identidad</h2>
+      <p>Estado: <span class="etiqueta ${k[0]}">${k[1]}</span></p>
+      <p class="suave">Tomarás una foto de tu cédula y una selfie. Comprobamos que el documento sea real, que coincida con tu cédula y tu nombre, y que la selfie sea tuya.${v.kyc.auto ? ' Si todo coincide, tu cuenta se verifica automáticamente.' : ''}</p>
+      ${v.kyc.estado === 'revision' && v.kyc.motivos.length ? html`<div class="banner espera"><b>Un administrador revisará tu caso:</b>${v.kyc.motivos.map((m) => html`<p>${m}</p>`)}</div>` : ''}
+      ${editable ? html`<button class="btn ${v.kyc.estado === 'aprobado' ? 'sec' : ''}" data-accion="kyc-iniciar" ${v.documento ? '' : new Raw('disabled')}>${v.kyc.estado ? 'Repetir verificación' : 'Verificar mi identidad'}</button>` : ''}
+      ${v.kyc.modo === 'simulado' && v.kyc.estado === 'pendiente' ? html`
+        <div class="banner"><b>Modo de pruebas</b> (sin documentos reales). Simula el resultado del proveedor:
+          <div class="acciones-fila">
+            <button class="btn chico" data-accion="kyc-simular" data-desenlace="aprobado">Todo coincide</button>
+            <button class="btn sec chico" data-accion="kyc-simular" data-desenlace="no_coincide">Documento de otra persona</button>
+            <button class="btn peligro chico" data-accion="kyc-simular" data-desenlace="rechazado">Rechazado</button>
+          </div></div>` : ''}
+    </section>` : ''}
+    <section class="tarjeta campos">
+      <h2>${conKyc ? '3. Título o certificado' : '2. Documentos'}</h2>
+      ${conKyc ? '' : paso('cedula', 'Foto de tu cédula (por ambos lados)', 'JPG, PNG o PDF, máximo 4 MB. Debe verse completa y legible.')}
+      ${paso('titulo', 'Título, diploma o certificado', 'Del estudio o experiencia que respalda lo que enseñas (JPG, PNG o PDF, máximo 4 MB). Un administrador puede revisarlo.')}
+      ${editable ? html`<button class="btn" data-accion="enviar-verificacion" ${v.completo ? '' : new Raw('disabled')}>${conKyc ? 'Terminar verificación' : 'Enviar a revisión'}</button>
         <p class="suave">Solo el equipo de Artia ve tus documentos. No se muestran en tu perfil público.</p>` : ''}
     </section>` : ''}`, { aviso: false });
 }
@@ -574,6 +593,8 @@ async function vistaAdmin(estado = 'pendiente') {
         <h3>${m.nombre}</h3>
         <p class="suave">${m.email} · ${m.ciudad || 'sin ciudad'} · Cédula: <b>${m.documento || '—'}</b> · Celular: ${m.telefono ? celular(m.telefono) : '—'}</p>
         <p><b>Materias:</b> ${m.materias || '—'}<br><b>Experiencia:</b> ${m.experiencia || '—'}</p>
+        <p><b>Identidad (KYC):</b> <span class="etiqueta ${(KYC_TXT[m.kyc_estado] ?? KYC_TXT[''])[0]}">${(KYC_TXT[m.kyc_estado] ?? ['', 'Sin KYC (revisión manual de documentos)'])[1]}</span></p>
+        ${m.kyc_motivos.length ? html`<div class="banner espera">${m.kyc_motivos.map((x) => html`<p>${x}</p>`)}</div>` : ''}
         <p>${m.documentos.map((d) => html`<a class="btn sec chico" href="/api/admin/documentos/${d.id}" target="_blank" rel="noopener">Ver ${NOMBRE_DOC[d.tipo]}</a> `)}</p>
         ${estado === 'pendiente' ? html`<div class="acciones-fila">
           <button class="btn chico" data-accion="aprobar" data-id="${m.id}">Aprobar</button>
@@ -727,7 +748,17 @@ document.addEventListener('click', async (ev) => {
     }
     if (accion === 'agregar-bloque') { leerBloques(); bloques.push({ dia: Number(dia), inicio: '14:00', fin: '18:00' }); pintarHorarios(); }
     if (accion === 'quitar-bloque') { leerBloques(); bloques.splice(Number(i), 1); pintarHorarios(); }
-    if (accion === 'enviar-verificacion') { await api('POST', '/api/verificacion/enviar'); await refrescarYo(); avisar('Enviado a revisión'); await enrutar(); }
+    if (accion === 'kyc-iniciar') {
+      b.disabled = true;
+      const r = await api('POST', '/api/kyc/iniciar');
+      if (r.url) { location.href = r.url; return; }
+      await enrutar(); return;
+    }
+    if (accion === 'kyc-simular') {
+      const r = await api('POST', '/api/kyc/simular', { desenlace: b.dataset.desenlace });
+      await refrescarYo(); avisar(r.estado === 'verificado' ? '¡Verificado automáticamente!' : 'Resultado procesado'); await enrutar(); return;
+    }
+    if (accion === 'enviar-verificacion') { await api('POST', '/api/verificacion/enviar'); await refrescarYo(); avisar(yo.verificacion_estado === 'verificado' ? '¡Verificado! Tus clases ya muestran la insignia.' : 'Enviado a revisión'); await enrutar(); }
     if (accion === 'pagar') {
       b.disabled = true;
       const p = await api('POST', '/api/pagos/iniciar');

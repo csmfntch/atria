@@ -17,6 +17,7 @@ import { registrarAgenda } from './agenda.mjs';
 import { registrarSuscripcion } from './suscripcion.mjs';
 import { registrarVerificacion } from './verificacion.mjs';
 import { crearAlmacen } from './almacen.mjs';
+import { proveedorSimulado } from './kyc.mjs';
 
 export { hashClave };
 
@@ -41,12 +42,15 @@ export function configDesdeEnv(env = process.env) {
     pagosSimulados: env.PAGOS_SIMULADOS === '1' && !produccion,
     // Detrás de un proxy (Render, Railway, Fly…) la IP real viene en X-Forwarded-For.
     confiarProxy: env.TRUST_PROXY === '1',
+    // KYC: simulado solo en desarrollo; en producción lo da el proveedor (Didit) cuando esté integrado.
+    kycSimulado: env.KYC_SIMULADO === '1' && !produccion,
+    kycAutoAprobar: env.KYC_AUTO_APROBAR !== '0',
     adminEmails: (env.ADMIN_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
   };
 }
 
 // ---------- aplicación ----------
-export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, almacen = null } = {}) {
+export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, almacen = null, kyc = null } = {}) {
   const config = { ...configDesdeEnv({}), ...configParcial };
   const q = (sql) => db.prepare(sql);
   const intentos = new Map(); // limitador simple de inicio de sesión: ip -> {n, hasta}
@@ -91,7 +95,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   };
   const privado = (u) => ({
     ...publico(u), email: u.email, telefono: u.telefono, es_admin: !!u.es_admin,
-    documento: u.documento, verificacion_estado: u.verificacion_estado, verificacion_nota: u.verificacion_nota,
+    documento: u.documento, verificacion_estado: u.verificacion_estado, verificacion_nota: u.verificacion_nota, kyc_estado: u.kyc_estado,
     nivel: u.nivel, intereses: u.intereses, colegio_tipo: u.colegio_tipo, colegio_nombre: u.colegio_nombre,
     localidad: u.localidad, grado: u.grado, es_menor: !!u.es_menor,
     acudiente_nombre: u.acudiente_nombre, acudiente_celular: u.acudiente_celular,
@@ -148,7 +152,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   const rutas = [];
   const ruta = (metodo, patron, fn, opciones = {}) => rutas.push({ metodo, re: new RegExp(`^${patron}$`), fn, ...opciones });
   const ctx = {
-    db, q, ruta, config, fetchFn, almacen, SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
+    db, q, ruta, config, fetchFn, almacen, kyc: kyc ?? (config.kycSimulado ? proveedorSimulado() : null), SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
     exigir, exigirAdmin, exigirSuscripcion, exigirMentorActivo, perfilEstudianteFalta, resumenResenas,
   };
 

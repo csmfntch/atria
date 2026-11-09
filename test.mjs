@@ -536,3 +536,100 @@ test('configuración por entorno: dominio público de Railway y precios', async 
   assert.equal(configDesdeEnv({ TRUST_PROXY: '1' }).confiarProxy, true);
   assert.equal(configDesdeEnv({ NODE_ENV: 'production', PAGOS_SIMULADOS: '1' }).pagosSimulados, false, 'sin pagos simulados en producción');
 });
+
+test('KYC: coincidencia de nombres colombianos', async () => {
+  const { coincideNombre, normalizarNombre } = await import('./kyc.mjs');
+  assert.equal(normalizarNombre('  José  Núñez-Pérez '), 'jose nunez perez');
+  assert.ok(coincideNombre('Alejandra Mora', 'MORA OCAMPO ALEJANDRA'), 'el documento trae apellidos primero');
+  assert.ok(coincideNombre('José Núñez', 'NUÑEZ PEREZ JOSE'), 'sin tildes ni mayúsculas');
+  assert.ok(!coincideNombre('Ana', 'RUIZ LOPEZ ANA'), 'un solo nombre no basta');
+  assert.ok(!coincideNombre('Ana Ruiz', 'RUIZ LOPEZ MARIA'), 'otra persona');
+  assert.ok(!coincideNombre('Ana Ruiz', ''), 'documento vacío');
+});
+
+test('KYC: verificación automática cuando todo coincide, revisión manual si no', async (t) => {
+  const app = await iniciar({ kycSimulado: true }); t.after(app.cerrar);
+  const nuevoMentor = async (nombre, sufijo) => {
+    const m = app.cliente();
+    await m('POST', '/api/registro', { rol: 'profesor', nombre, email: `kyc${sufijo}@x.co`, password: 'clave12345' });
+    await m('PUT', '/api/perfil', { nombre, ciudad: 'Bogotá D.C.', documento: '52.123.456', materias: 'Matemáticas' });
+    return m;
+  };
+  const admin = app.cliente();
+  await admin('POST', '/api/registro', { rol: 'estudiante', nombre: 'Admin', email: 'admin@x.co', password: 'clave12345', colegio_tipo: 'ninguno' });
+  app.db.prepare(`UPDATE usuarios SET es_admin = 1 WHERE email = 'admin@x.co'`).run();
+
+  // 1) Todo coincide → se verifica solo
+  let m = await nuevoMentor('Laura Gómez', 1);
+  assert.equal((await m('GET', '/api/verificacion')).datos.kyc.modo, 'simulado');
+  assert.equal((await m('POST', '/api/kyc/simular', { desenlace: 'aprobado' })).estado, 409, 'primero iniciar');
+  assert.equal((await m('POST', '/api/verificacion/enviar')).estado, 400, 'falta el título');
+  await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
+  assert.equal((await m('POST', '/api/verificacion/enviar')).estado, 400, 'falta la verificación de identidad');
+  assert.equal((await m('POST', '/api/kyc/iniciar')).estado, 201);
+  assert.equal((await m('GET', '/api/verificacion')).datos.completo, false);
+  let r = await m('POST', '/api/kyc/simular', { desenlace: 'aprobado' });
+  assert.equal(r.datos.kyc_estado, 'aprobado');
+  assert.equal((await m('GET', '/api/verificacion')).datos.completo, true, 'no pide la foto de la cédula: la toma el proveedor');
+  r = await m('POST', '/api/verificacion/enviar');
+  assert.equal(r.datos.estado, 'verificado');
+  assert.equal((await m('GET', '/api/yo')).datos.usuario.verificacion_estado, 'verificado');
+
+  // 2) El documento es de otra persona → no se verifica solo: va al administrador con los motivos
+  m = await nuevoMentor('Pedro Salazar', 2);
+  await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
+  await m('POST', '/api/kyc/iniciar');
+  r = await m('POST', '/api/kyc/simular', { desenlace: 'no_coincide' });
+  assert.equal(r.datos.kyc_estado, 'revision');
+  assert.equal(r.datos.motivos.length, 2, 'cédula y nombre no coinciden');
+  assert.equal((await m('POST', '/api/verificacion/enviar')).datos.estado, 'pendiente');
+  const lista = (await admin('GET', '/api/admin/verificaciones')).datos.mentores.find((x) => x.nombre === 'Pedro Salazar');
+  assert.equal(lista.kyc_estado, 'revision');
+  assert.match(lista.kyc_motivos.join(' '), /cédula/);
+  // si después la identidad se confirma, pasa a verificado sin intervención
+  await m('POST', '/api/kyc/iniciar'); // reintento ya en revisión: nueva sesión
+  assert.equal((await m('POST', '/api/kyc/simular', { desenlace: 'aprobado' })).datos.estado, 'verificado');
+
+  // 3) El proveedor rechaza el documento → debe reintentar
+  m = await nuevoMentor('Marta Ríos', 3);
+  await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
+  await m('POST', '/api/kyc/iniciar');
+  assert.equal((await m('POST', '/api/kyc/simular', { desenlace: 'rechazado' })).datos.kyc_estado, 'rechazado');
+  assert.equal((await m('POST', '/api/verificacion/enviar')).estado, 400);
+  await m('POST', '/api/kyc/iniciar');
+  await m('POST', '/api/kyc/simular', { desenlace: 'aprobado' });
+  assert.equal((await m('POST', '/api/verificacion/enviar')).datos.estado, 'verificado');
+
+  // 4) Validaciones al iniciar
+  const sinDoc = app.cliente();
+  await sinDoc('POST', '/api/registro', { rol: 'profesor', nombre: 'Juan Pérez', email: 'juan@x.co', password: 'clave12345' });
+  assert.equal((await sinDoc('POST', '/api/kyc/iniciar')).estado, 400, 'falta la cédula');
+  await sinDoc('PUT', '/api/perfil', { nombre: 'Juan', documento: '123456' });
+  const unNombre = await sinDoc('POST', '/api/kyc/iniciar');
+  assert.equal(unNombre.estado, 400);
+  assert.match(unNombre.datos.error, /apellido/);
+  const est = app.cliente(); await registrar(est, 'estudiante', 'Ana');
+  assert.equal((await est('POST', '/api/kyc/iniciar')).estado, 403, 'solo mentores');
+});
+
+test('KYC: aprobación manual si se desactiva la automática, y sin simulación en producción', async (t) => {
+  const app = await iniciar({ kycSimulado: true, kycAutoAprobar: false }); t.after(app.cerrar);
+  const m = app.cliente();
+  await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
+  await m('PUT', '/api/perfil', { nombre: 'Laura Gómez', documento: '52123456' });
+  await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
+  await m('POST', '/api/kyc/iniciar');
+  await m('POST', '/api/kyc/simular', { desenlace: 'aprobado' });
+  assert.equal((await m('POST', '/api/verificacion/enviar')).datos.estado, 'pendiente', 'queda para el administrador');
+
+  const sin = await iniciar(); t.after(sin.cerrar);   // sin KYC configurado: flujo manual de documentos
+  const x = sin.cliente();
+  await x('POST', '/api/registro', { rol: 'profesor', nombre: 'Ana Ruiz', email: 'a@x.co', password: 'clave12345' });
+  assert.equal((await x('POST', '/api/kyc/iniciar')).estado, 503);
+  assert.equal((await x('POST', '/api/kyc/simular', { desenlace: 'aprobado' })).estado, 404);
+  assert.equal((await x('GET', '/api/verificacion')).datos.kyc.modo, 'ninguno');
+  const { configDesdeEnv } = await import('./server.mjs');
+  assert.equal(configDesdeEnv({ KYC_SIMULADO: '1', NODE_ENV: 'production' }).kycSimulado, false);
+  assert.equal(configDesdeEnv({}).kycAutoAprobar, true);
+  assert.equal(configDesdeEnv({ KYC_AUTO_APROBAR: '0' }).kycAutoAprobar, false);
+});

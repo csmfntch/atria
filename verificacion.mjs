@@ -1,6 +1,7 @@
 // Verificación de mentores: cédula + título/certificado, revisados por un administrador.
 import { randomBytes } from 'node:crypto';
 import { falla, json, Resp, texto } from './helpers.mjs';
+import { evaluarResultado, resumen, normalizarNombre } from './kyc.mjs';
 
 const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'application/pdf': 'pdf' };
 
@@ -15,15 +16,40 @@ export function tipoArchivo(buf) {
   return null;
 }
 
-export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen }) {
+export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, kyc, config }) {
   const documentosDe = (uid) => q('SELECT id, tipo, mime, creado FROM documentos WHERE usuario_id = ? ORDER BY id').all(uid);
+  const tieneTitulo = (uid) => documentosDe(uid).some((d) => d.tipo === 'titulo');
+  const motivosDe = (u) => { try { return JSON.parse(u.kyc_resultado || '{}').motivos ?? []; } catch { return []; } };
+
+  /**
+   * Aplica un resultado normalizado del proveedor de KYC (webhook o simulación) al mentor dueño de la sesión.
+   * - Rechazado por el proveedor → el mentor puede reintentar.
+   * - Aprobado y todo coincide (cédula, nombre, rostro, vida) → si ya envió su verificación y subió su título,
+   *   se verifica solo (KYC_AUTO_APROBAR, activado por defecto); si no, queda para el administrador.
+   */
+  function procesarResultadoKyc(r) {
+    const u = q('SELECT * FROM usuarios WHERE kyc_sesion = ? AND rol = ?').get(r.sesionId, 'profesor');
+    if (!u || u.verificacion_estado === 'verificado') return null;
+    const decision = evaluarResultado(u, r);
+    q('UPDATE usuarios SET kyc_estado = ?, kyc_resultado = ? WHERE id = ?').run(decision.kyc, resumen(kyc?.nombre ?? 'proveedor', r, decision), u.id);
+    if (decision.kyc === 'rechazado' && u.verificacion_estado === 'pendiente')
+      q(`UPDATE usuarios SET verificacion_estado = 'rechazado', verificacion_nota = ? WHERE id = ?`).run('No pudimos verificar tu identidad. Inténtalo de nuevo con buena luz y el documento completo.', u.id);
+    if (decision.kyc === 'aprobado' && u.verificacion_estado === 'pendiente' && config.kycAutoAprobar && tieneTitulo(u.id))
+      q(`UPDATE usuarios SET verificacion_estado = 'verificado', verificacion_nota = '' WHERE id = ?`).run(u.id);
+    return decision;
+  }
 
   ruta('GET', '/api/verificacion', ({ usuario }) => {
     exigir(usuario, 'profesor');
     const docs = documentosDe(usuario.id);
+    const conKyc = !!kyc;
+    const completo = conKyc
+      ? !!usuario.documento && docs.some((d) => d.tipo === 'titulo') && ['aprobado', 'revision'].includes(usuario.kyc_estado)
+      : !!usuario.documento && TIPOS_DOC.every((t) => docs.some((d) => d.tipo === t));
     return {
       estado: usuario.verificacion_estado, nota: usuario.verificacion_nota, documento: usuario.documento,
-      documentos: docs, completo: !!usuario.documento && TIPOS_DOC.every((t) => docs.some((d) => d.tipo === t)),
+      documentos: docs, completo,
+      kyc: { modo: kyc?.modo ?? 'ninguno', estado: usuario.kyc_estado, motivos: motivosDe(usuario), auto: config.kycAutoAprobar },
     };
   });
 
@@ -51,23 +77,53 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen })
     return json(201, { id: Number(lastInsertRowid), tipo, mime });
   }, { binario: MAX_DOC });
 
+  // ---------- KYC: verificación de identidad con proveedor ----------
+  ruta('POST', '/api/kyc/iniciar', async ({ usuario }) => {
+    exigir(usuario, 'profesor');
+    if (!kyc) falla(503, 'La verificación de identidad aún no está disponible.');
+    if (usuario.verificacion_estado === 'verificado') falla(409, 'Tu cuenta ya está verificada.');
+    if (!usuario.documento) falla(400, 'Agrega el número de tu cédula antes de iniciar.');
+    if (normalizarNombre(usuario.nombre).split(' ').filter(Boolean).length < 2) falla(400, 'Escribe tu nombre y apellido completos en tu perfil, como aparecen en tu cédula.');
+    let sesion;
+    try { sesion = await kyc.crearSesion({ usuario }); } catch (e) { console.error(e.message); falla(502, 'No pudimos iniciar la verificación. Inténtalo de nuevo.'); }
+    q('UPDATE usuarios SET kyc_estado = ?, kyc_sesion = ?, kyc_resultado = ? WHERE id = ?').run('pendiente', sesion.sesionId, '', usuario.id);
+    return json(201, { modo: kyc.modo, url: sesion.url });
+  });
+
+  // Solo desarrollo (KYC_SIMULADO=1): fabrica un desenlace de prueba y lo procesa como si lo enviara el proveedor.
+  ruta('POST', '/api/kyc/simular', ({ usuario, body }) => {
+    exigir(usuario, 'profesor');
+    if (kyc?.modo !== 'simulado') falla(404, 'No encontrado.');
+    if (!usuario.kyc_sesion) falla(409, 'Primero inicia la verificación.');
+    const desenlace = ['aprobado', 'rechazado', 'no_coincide'].includes(body.desenlace) ? body.desenlace : falla(400, 'Desenlace no válido.');
+    procesarResultadoKyc(kyc.resultadoDePrueba(usuario, usuario.kyc_sesion, desenlace));
+    const u = q('SELECT kyc_estado, kyc_resultado, verificacion_estado FROM usuarios WHERE id = ?').get(usuario.id);
+    return { kyc_estado: u.kyc_estado, motivos: motivosDe(u), estado: u.verificacion_estado };
+  });
+
   ruta('POST', '/api/verificacion/enviar', ({ usuario }) => {
     exigir(usuario, 'profesor');
     if (!['sin_enviar', 'rechazado'].includes(usuario.verificacion_estado)) falla(409, 'Ya enviaste tu verificación.');
     if (!usuario.documento) falla(400, 'Agrega el número de tu cédula en tu perfil.');
     const docs = documentosDe(usuario.id);
-    if (!TIPOS_DOC.every((t) => docs.some((d) => d.tipo === t))) falla(400, 'Sube tu cédula y tu título o certificado.');
-    q(`UPDATE usuarios SET verificacion_estado = 'pendiente', verificacion_nota = '' WHERE id = ?`).run(usuario.id);
-    return { estado: 'pendiente' };
+    if (kyc) {
+      if (!docs.some((d) => d.tipo === 'titulo')) falla(400, 'Sube tu título o certificado.');
+      if (usuario.kyc_estado === 'rechazado') falla(400, 'No se pudo verificar tu identidad. Inicia la verificación de nuevo.');
+      if (!['aprobado', 'revision'].includes(usuario.kyc_estado)) falla(400, 'Completa primero la verificación de identidad.');
+    } else if (!TIPOS_DOC.every((t) => docs.some((d) => d.tipo === t))) falla(400, 'Sube tu cédula y tu título o certificado.');
+    // Identidad confirmada por el proveedor y todo coincide → se verifica automáticamente (si está activado)
+    const auto = !!kyc && usuario.kyc_estado === 'aprobado' && config.kycAutoAprobar;
+    q('UPDATE usuarios SET verificacion_estado = ?, verificacion_nota = ? WHERE id = ?').run(auto ? 'verificado' : 'pendiente', '', usuario.id);
+    return { estado: auto ? 'verificado' : 'pendiente' };
   });
 
   // ---------- administración ----------
   ruta('GET', '/api/admin/verificaciones', ({ usuario, query }) => {
     exigirAdmin(usuario);
     const estado = ['pendiente', 'verificado', 'rechazado'].includes(query.estado) ? query.estado : 'pendiente';
-    const mentores = q(`SELECT id, nombre, email, ciudad, telefono, materias, experiencia, documento, verificacion_estado, creado
+    const mentores = q(`SELECT id, nombre, email, ciudad, telefono, materias, experiencia, documento, verificacion_estado, kyc_estado, kyc_resultado, creado
       FROM usuarios WHERE rol = 'profesor' AND verificacion_estado = ? ORDER BY id`).all(estado);
-    return { mentores: mentores.map((m) => ({ ...m, documentos: documentosDe(m.id) })) };
+    return { mentores: mentores.map(({ kyc_resultado, ...m }) => ({ ...m, kyc_motivos: motivosDe({ kyc_resultado }), documentos: documentosDe(m.id) })) };
   });
 
   ruta('GET', '/api/admin/documentos/(\\d+)', async ({ usuario, params }) => {

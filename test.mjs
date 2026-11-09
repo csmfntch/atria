@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { createHmac } from 'node:crypto';
 import { abrirBD } from './db.mjs';
 import { crearApp } from './server.mjs';
 import { firmaIntegridad, checksumEvento } from './suscripcion.mjs';
@@ -632,4 +633,150 @@ test('KYC: aprobación manual si se desactiva la automática, y sin simulación 
   assert.equal(configDesdeEnv({ KYC_SIMULADO: '1', NODE_ENV: 'production' }).kycSimulado, false);
   assert.equal(configDesdeEnv({}).kycAutoAprobar, true);
   assert.equal(configDesdeEnv({ KYC_AUTO_APROBAR: '0' }).kycAutoAprobar, false);
+});
+
+// ---------- Didit ----------
+const SECRETO = 'whsec_prueba';
+const firmarCrudo = (crudo, secreto = SECRETO) => createHmac('sha256', secreto).update(crudo).digest('hex');
+const eventoDidit = (extra = {}, decision = {}) => ({
+  event_id: 'e1', webhook_type: 'status.updated', timestamp: Math.floor(Date.now() / 1000), created_at: Math.floor(Date.now() / 1000),
+  application_id: 'app', environment: 'live', session_id: 'sess-1', status: 'Approved', vendor_data: 'artia-mentor-1', ...extra,
+  decision: {
+    session_id: 'sess-1', status: 'Approved',
+    id_verifications: [{ node_id: 'ocr', status: 'Approved', document_type: 'Identity Card', document_number: '52.123.456', personal_number: '52123456',
+      first_name: 'Laura', last_name: 'Gómez Pérez', full_name: 'Laura Gómez Pérez', issuing_state: 'COL', warnings: [] }],
+    liveness_checks: [{ node_id: 'l', status: 'Approved', score: 98 }],
+    face_matches: [{ node_id: 'f', status: 'Approved', score: 95 }],
+    database_validations: [{ node_id: 'db', status: 'Approved', match_type: 'full_match' }],
+    ...decision,
+  },
+});
+const enviarWebhook = (app, evento, { secreto = SECRETO, ts, cabecerasExtra = {}, crudo = Buffer.from(JSON.stringify(evento)) } = {}) => {
+  const t = String(ts ?? Math.floor(Date.now() / 1000));
+  return fetch(app.base + '/api/kyc/webhook', { method: 'POST', body: crudo,
+    headers: { 'Content-Type': 'application/json', 'x-timestamp': t, 'x-signature': firmarCrudo(crudo, secreto), ...cabecerasExtra } }).then(async (r) => ({ estado: r.status, datos: await r.json() }));
+};
+
+test('Didit: firma del webhook (bytes crudos, JSON canónico V2, secreto rotado, fecha, manipulación)', async () => {
+  const { verificarFirma, canonico } = await import('./didit.mjs');
+  const evento = eventoDidit({}, {});
+  const crudo = Buffer.from(JSON.stringify(evento));
+  const ahora = Math.floor(Date.now() / 1000);
+  const h = (extra) => ({ 'x-timestamp': String(ahora), ...extra });
+  assert.ok(verificarFirma(crudo, h({ 'x-signature': firmarCrudo(crudo) }), SECRETO), 'X-Signature sobre los bytes exactos');
+  // V2: canónico (llaves ordenadas, sin espacios, Unicode sin escapar) — aunque el cuerpo llegue con otro orden y espacios
+  const reordenado = Buffer.from(JSON.stringify(evento, null, 2));
+  const v2 = createHmac('sha256', SECRETO).update(canonico(evento)).digest('hex');
+  assert.ok(verificarFirma(reordenado, h({ 'x-signature-v2': v2 }), SECRETO), 'X-Signature-V2 sobrevive a un re-formateo');
+  assert.match(canonico({ b: 1, a: { z: 'José', 10: 1, 9: 2 } }), /^\{"a":\{"10":1,"9":2,"z":"José"\},"b":1\}$/, 'orden por texto, Unicode sin escapar');
+  // secreto rotado: la firma con el secreto anterior llega en -Previous
+  assert.ok(verificarFirma(crudo, h({ 'x-signature': 'mala', 'x-signature-previous': firmarCrudo(crudo) }), SECRETO));
+  // rechazos
+  assert.equal(verificarFirma(crudo, h({ 'x-signature': firmarCrudo(crudo, 'otro') }), SECRETO), null, 'secreto incorrecto');
+  assert.equal(verificarFirma(Buffer.from(JSON.stringify({ ...evento, status: 'Declined' })), h({ 'x-signature': firmarCrudo(crudo) }), SECRETO), null, 'cuerpo alterado');
+  assert.equal(verificarFirma(crudo, { 'x-timestamp': String(ahora - 400), 'x-signature': firmarCrudo(crudo) }, SECRETO), null, 'fecha vieja (repetición)');
+  assert.equal(verificarFirma(crudo, { 'x-signature': firmarCrudo(crudo) }, SECRETO), null, 'sin X-Timestamp');
+  assert.equal(verificarFirma(crudo, h({}), SECRETO), null, 'sin firma');
+  assert.equal(verificarFirma(crudo, h({ 'x-signature': firmarCrudo(crudo) }), ''), null, 'sin secreto configurado');
+  // X-Signature-Simple NO se acepta: solo firma el sobre, no la decisión
+  const simple = createHmac('sha256', SECRETO).update(`${evento.timestamp}:${evento.session_id}:${evento.status}:${evento.webhook_type}`).digest('hex');
+  assert.equal(verificarFirma(crudo, h({ 'x-signature-simple': simple }), SECRETO), null);
+});
+
+test('Didit: crear sesión, webhook firmado → verificación automática, y casos de rechazo', async (t) => {
+  const llamadas = [];
+  const fetchFn = async (url, init) => { llamadas.push({ url, init }); return { ok: true, status: 201, json: async () => ({ session_id: 'sess-1', url: 'https://verify.didit.me/session/abc', status: 'Not Started' }), text: async () => '' }; };
+  const app = await iniciar({ didit: { apiKey: 'sk_test_x', workflowId: 'wf-1', webhookSecret: SECRETO }, baseUrl: 'https://artia.test' }, { fetchFn });
+  t.after(app.cerrar);
+  const m = app.cliente();
+  await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
+  await m('PUT', '/api/perfil', { nombre: 'Laura Gómez', ciudad: 'Bogotá D.C.', documento: '52123456' });
+  await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
+  assert.equal((await m('GET', '/api/verificacion')).datos.kyc.modo, 'didit');
+
+  const ini = await m('POST', '/api/kyc/iniciar');
+  assert.equal(ini.estado, 201);
+  assert.equal(ini.datos.url, 'https://verify.didit.me/session/abc', 'devuelve el enlace de Didit');
+  const { url, init } = llamadas[0];
+  const cuerpo = JSON.parse(init.body);
+  assert.equal(url, 'https://verification.didit.me/v3/session/');
+  assert.equal(init.headers['x-api-key'], 'sk_test_x');
+  assert.equal(cuerpo.workflow_id, 'wf-1');
+  assert.match(cuerpo.vendor_data, /^artia-mentor-\d+$/);
+  assert.equal(cuerpo.callback, 'https://artia.test/api/kyc/retorno');
+  assert.equal(cuerpo.language, 'es');
+  assert.equal(cuerpo.expected_details.id_country, 'COL');
+  assert.equal(cuerpo.expected_details.identification_number, '52123456');
+
+  const retorno = await fetch(app.base + '/api/kyc/retorno?verificationSessionId=sess-1&status=Approved', { redirect: 'manual' });
+  assert.equal(retorno.status, 302);
+  assert.equal(retorno.headers.get('location'), '/#/verificacion?kyc=1');
+
+  // firma mala → 401 y no cambia nada
+  assert.equal((await enviarWebhook(app, eventoDidit(), { secreto: 'otro' })).estado, 401);
+  assert.equal((await m('GET', '/api/verificacion')).datos.kyc.estado, 'pendiente');
+  // evento «en curso» no pisa nada
+  assert.equal((await enviarWebhook(app, eventoDidit({ status: 'In Progress' }, { id_verifications: null }))).estado, 200);
+  assert.equal((await m('GET', '/api/verificacion')).datos.kyc.estado, 'pendiente');
+  // aprobado y todo coincide (número en document_number con puntos; nombre en orden «NOMBRE APELLIDOS»)
+  assert.equal((await enviarWebhook(app, eventoDidit())).estado, 200);
+  assert.equal((await m('GET', '/api/verificacion')).datos.kyc.estado, 'aprobado');
+  assert.equal((await m('POST', '/api/verificacion/enviar')).datos.estado, 'verificado');
+
+  // otro mentor: Didit aprueba pero el documento es de otra persona → administrador, con motivos
+  const p = app.cliente();
+  await p('POST', '/api/registro', { rol: 'profesor', nombre: 'Pedro Salazar', email: 'p@x.co', password: 'clave12345' });
+  await p('PUT', '/api/perfil', { nombre: 'Pedro Salazar', documento: '80111222' });
+  await p('POST', '/api/kyc/iniciar');
+  llamadas.length = 0;
+  app.db.prepare(`UPDATE usuarios SET kyc_sesion = 'sess-2' WHERE email = 'p@x.co'`).run();
+  await enviarWebhook(app, eventoDidit({ session_id: 'sess-2' }));   // documento de Laura Gómez, cédula 52123456
+  const v = (await p('GET', '/api/verificacion')).datos.kyc;
+  assert.equal(v.estado, 'revision');
+  assert.equal(v.motivos.length, 2, 'cédula y nombre no coinciden');
+
+  // sin prueba de vida o sin rostro en el flujo → nunca se verifica solo
+  const q2 = app.cliente();
+  await q2('POST', '/api/registro', { rol: 'profesor', nombre: 'Ana Ruiz', email: 'a@x.co', password: 'clave12345' });
+  await q2('PUT', '/api/perfil', { nombre: 'Ana Ruiz', documento: '52123456' });
+  await q2('POST', '/api/kyc/iniciar');
+  app.db.prepare(`UPDATE usuarios SET kyc_sesion = 'sess-3' WHERE email = 'a@x.co'`).run();
+  await enviarWebhook(app, eventoDidit({ session_id: 'sess-3' }, { id_verifications: [{ status: 'Approved', document_number: '52123456', full_name: 'Ana Ruiz' }], liveness_checks: null, face_matches: [{ status: 'Declined' }] }));
+  const v3 = (await q2('GET', '/api/verificacion')).datos.kyc;
+  assert.equal(v3.estado, 'revision');
+  assert.match(v3.motivos.join(' '), /rostro/);
+  assert.match(v3.motivos.join(' '), /vida/);
+
+  // Didit rechaza el documento → el mentor puede reintentar
+  const r = app.cliente();
+  await r('POST', '/api/registro', { rol: 'profesor', nombre: 'Marta Ríos', email: 'm@x.co', password: 'clave12345' });
+  await r('PUT', '/api/perfil', { nombre: 'Marta Ríos', documento: '52123456' });
+  await r('POST', '/api/kyc/iniciar');
+  app.db.prepare(`UPDATE usuarios SET kyc_sesion = 'sess-4' WHERE email = 'm@x.co'`).run();
+  await enviarWebhook(app, eventoDidit({ session_id: 'sess-4', status: 'Declined' }, { id_verifications: [{ status: 'Declined', warnings: [{ risk: 'DOCUMENT_EXPIRED' }] }] }));
+  assert.equal((await r('GET', '/api/verificacion')).datos.kyc.estado, 'rechazado');
+
+  // eventos desordenados: uno más antiguo no pisa el resultado reciente
+  const t0 = Math.floor(Date.now() / 1000);
+  await enviarWebhook(app, eventoDidit({ session_id: 'sess-4', status: 'Approved', created_at: t0 + 100 }, { id_verifications: [{ status: 'Approved', document_number: '52123456', full_name: 'Marta Ríos' }] }));
+  assert.equal((await r('GET', '/api/verificacion')).datos.kyc.estado, 'aprobado');
+  await enviarWebhook(app, eventoDidit({ session_id: 'sess-4', status: 'Declined', created_at: t0 + 50 }, {}));
+  assert.equal((await r('GET', '/api/verificacion')).datos.kyc.estado, 'aprobado', 'el evento antiguo se ignora');
+
+  // sesión desconocida: se acepta (200) sin efecto; sin proveedor la ruta no existe
+  assert.equal((await enviarWebhook(app, eventoDidit({ session_id: 'no-existe' }))).estado, 200);
+  const sin = await iniciar(); t.after(sin.cerrar);
+  assert.equal((await enviarWebhook(sin, eventoDidit())).estado, 404);
+});
+
+test('Didit: error del proveedor al crear la sesión no deja al mentor a medias', async (t) => {
+  const fetchFn = async () => ({ ok: false, status: 400, text: async () => '{"workflow_id":["Invalid workflow_id."]}', json: async () => ({}) });
+  const app = await iniciar({ didit: { apiKey: 'k', workflowId: 'mal', webhookSecret: SECRETO } }, { fetchFn }); t.after(app.cerrar);
+  const m = app.cliente();
+  await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
+  await m('PUT', '/api/perfil', { nombre: 'Laura Gómez', documento: '52123456' });
+  const r = await m('POST', '/api/kyc/iniciar');
+  assert.equal(r.estado, 502);
+  assert.doesNotMatch(JSON.stringify(r.datos), /workflow_id/, 'no filtra el detalle interno al usuario');
+  assert.equal((await m('GET', '/api/verificacion')).datos.kyc.estado, '');
 });

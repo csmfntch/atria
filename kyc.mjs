@@ -2,7 +2,8 @@
 //
 // Un proveedor (Didit, etc.) verifica la cédula con foto y selfie y nos devuelve un resultado normalizado:
 //   { sesionId, estado: 'aprobado'|'rechazado'|'revision'|'pendiente',
-//     numeroDocumento, nombreCompleto, rostroCoincide: bool|null, vivo: bool|null }
+//     numeroDocumento, nombreCompleto, rostroCoincide: bool|null, vivo: bool|null,
+//     registroCoincide: bool|null (cédula contra el registro oficial, si el flujo lo incluye), eventoTs: segundos|null }
 // Aquí decidimos si ese resultado coincide con lo que el mentor declaró en su perfil.
 import { randomBytes } from 'node:crypto';
 import { normalizarDocumento } from './colombia.mjs';
@@ -27,17 +28,21 @@ export function evaluarResultado(usuario, r) {
   if (r.estado === 'rechazado') return { kyc: 'rechazado', motivos: ['El proveedor no pudo verificar el documento.'] };
   const motivos = [];
   if (r.estado === 'revision') motivos.push('El proveedor marcó el caso para revisión manual.');
-  if (normalizarDocumento(r.numeroDocumento) !== usuario.documento) motivos.push('El número de cédula del documento no coincide con el declarado.');
+  // El número puede venir en más de un campo (p. ej. document_number y personal_number): basta con que uno coincida.
+  const numeros = [].concat(r.numeroDocumento ?? []).map(normalizarDocumento);
+  if (!numeros.includes(usuario.documento)) motivos.push('El número de cédula del documento no coincide con el declarado.');
   if (!coincideNombre(usuario.nombre, r.nombreCompleto)) motivos.push('El nombre del documento no coincide con el del perfil (se necesitan nombre y apellido).');
-  if (r.rostroCoincide === false) motivos.push('El rostro de la selfie no coincide con la foto del documento.');
-  if (r.vivo === false) motivos.push('No se confirmó que la selfie fuera de una persona real (prueba de vida).');
+  if (r.rostroCoincide !== true) motivos.push(r.rostroCoincide === false ? 'El rostro de la selfie no coincide con la foto del documento.' : 'No se verificó el rostro contra el documento.');
+  if (r.vivo !== true) motivos.push(r.vivo === false ? 'No se confirmó que la selfie fuera de una persona real (prueba de vida).' : 'No se hizo la prueba de vida.');
+  if (r.registroCoincide === false) motivos.push('La cédula no coincide con los datos del registro oficial.');
   return { kyc: motivos.length ? 'revision' : 'aprobado', motivos };
 }
 
 /** Resumen que guardamos (sin imágenes ni datos de más; solo lo necesario para auditar la decisión). */
 export const resumen = (proveedor, r, decision) => JSON.stringify({
   proveedor, estado_proveedor: r.estado, decision: decision.kyc, motivos: decision.motivos,
-  rostro: r.rostroCoincide ?? null, vivo: r.vivo ?? null, fecha: new Date().toISOString(),
+  rostro: r.rostroCoincide ?? null, vivo: r.vivo ?? null, registro: r.registroCoincide ?? null,
+  evento_ts: r.eventoTs ?? null, fecha: new Date().toISOString(),
 });
 
 /**

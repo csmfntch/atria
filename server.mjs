@@ -18,6 +18,7 @@ import { registrarSuscripcion } from './suscripcion.mjs';
 import { registrarVerificacion } from './verificacion.mjs';
 import { crearAlmacen } from './almacen.mjs';
 import { proveedorSimulado } from './kyc.mjs';
+import { proveedorDidit } from './didit.mjs';
 
 export { hashClave };
 
@@ -43,6 +44,8 @@ export function configDesdeEnv(env = process.env) {
     // Detrás de un proxy (Render, Railway, Fly…) la IP real viene en X-Forwarded-For.
     confiarProxy: env.TRUST_PROXY === '1',
     // KYC: simulado solo en desarrollo; en producción lo da el proveedor (Didit) cuando esté integrado.
+    didit: env.DIDIT_API_KEY && env.DIDIT_WORKFLOW_ID && env.DIDIT_WEBHOOK_SECRET
+      ? { apiKey: env.DIDIT_API_KEY, workflowId: env.DIDIT_WORKFLOW_ID, webhookSecret: env.DIDIT_WEBHOOK_SECRET } : null,
     kycSimulado: env.KYC_SIMULADO === '1' && !produccion,
     kycAutoAprobar: env.KYC_AUTO_APROBAR !== '0',
     adminEmails: (env.ADMIN_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
@@ -152,7 +155,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   const rutas = [];
   const ruta = (metodo, patron, fn, opciones = {}) => rutas.push({ metodo, re: new RegExp(`^${patron}$`), fn, ...opciones });
   const ctx = {
-    db, q, ruta, config, fetchFn, almacen, kyc: kyc ?? (config.kycSimulado ? proveedorSimulado() : null), SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
+    db, q, ruta, config, fetchFn, almacen, kyc: kyc ?? (config.didit ? proveedorDidit({ ...config.didit, baseUrl: config.baseUrl, fetchFn }) : config.kycSimulado ? proveedorSimulado() : null), SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
     exigir, exigirAdmin, exigirSuscripcion, exigirMentorActivo, perfilEstudianteFalta, resumenResenas,
   };
 
@@ -455,6 +458,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv.includes('--demo')) (await import('./demo.mjs')).sembrar(db, { hashClave });
   const puerto = Number(process.env.PORT ?? 3100);
   const config = configDesdeEnv();
+  if (config.seguro && !config.didit) console.warn('⚠ DIDIT_* no configurado: la verificación de mentores será manual (revisión de documentos).');
   if (config.seguro && !config.wompi) console.warn('⚠ WOMPI_PUBLIC_KEY / WOMPI_INTEGRITY_SECRET no configurados: no se podrán cobrar suscripciones.');
   // Documentos de verificación: Supabase Storage (bucket privado) si hay SUPABASE_URL; si no, la base local.
   const almacen = process.env.SUPABASE_URL ? crearAlmacen({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }) : null;

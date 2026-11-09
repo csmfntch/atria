@@ -1,6 +1,6 @@
 // Verificación de mentores: cédula + título/certificado, revisados por un administrador.
 import { randomBytes } from 'node:crypto';
-import { falla, json, Resp, texto } from './helpers.mjs';
+import { falla, json, redirigir, Resp, texto } from './helpers.mjs';
 import { evaluarResultado, resumen, normalizarNombre } from './kyc.mjs';
 
 const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'application/pdf': 'pdf' };
@@ -31,6 +31,12 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
     const u = q('SELECT * FROM usuarios WHERE kyc_sesion = ? AND rol = ?').get(r.sesionId, 'profesor');
     if (!u || u.verificacion_estado === 'verificado') return null;
     const decision = evaluarResultado(u, r);
+    if (decision.kyc === 'pendiente') return decision;   // «en curso»: no pisa un resultado ya recibido
+    // Los eventos pueden llegar desordenados: se ignora uno más antiguo que el ya guardado.
+    try {
+      const previo = JSON.parse(u.kyc_resultado || '{}').evento_ts;
+      if (r.eventoTs && previo && r.eventoTs < previo) return null;
+    } catch { /* sin resultado previo */ }
     q('UPDATE usuarios SET kyc_estado = ?, kyc_resultado = ? WHERE id = ?').run(decision.kyc, resumen(kyc?.nombre ?? 'proveedor', r, decision), u.id);
     if (decision.kyc === 'rechazado' && u.verificacion_estado === 'pendiente')
       q(`UPDATE usuarios SET verificacion_estado = 'rechazado', verificacion_nota = ? WHERE id = ?`).run('No pudimos verificar tu identidad. Inténtalo de nuevo con buena luz y el documento completo.', u.id);
@@ -89,6 +95,18 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
     q('UPDATE usuarios SET kyc_estado = ?, kyc_sesion = ?, kyc_resultado = ? WHERE id = ?').run('pendiente', sesion.sesionId, '', usuario.id);
     return json(201, { modo: kyc.modo, url: sesion.url });
   });
+
+  // Didit devuelve al mentor aquí (con ?verificationSessionId=…&status=…); el resultado real llega por el webhook.
+  ruta('GET', '/api/kyc/retorno', () => redirigir('/#/verificacion?kyc=1'));
+
+  // Webhook del proveedor. Se lee el cuerpo crudo (la firma se calcula sobre esos bytes) y se verifica ANTES de usarlo.
+  ruta('POST', '/api/kyc/webhook', ({ req, body }) => {
+    if (!kyc?.verificarWebhook) falla(404, 'No encontrado.');
+    const evento = kyc.verificarWebhook(body, req.headers) ?? falla(401, 'Firma inválida.');
+    const r = kyc.aResultado(evento);
+    if (r) procesarResultadoKyc(r);
+    return { ok: true };
+  }, { binario: 2_000_000 });
 
   // Solo desarrollo (KYC_SIMULADO=1): fabrica un desenlace de prueba y lo procesa como si lo enviara el proveedor.
   ruta('POST', '/api/kyc/simular', ({ usuario, body }) => {

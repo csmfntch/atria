@@ -356,8 +356,14 @@ async function vistaSuscripcion(params) {
 
 // ---------- verificación del mentor ----------
 const KYC_TXT = { '': ['espera', 'Sin iniciar'], pendiente: ['espera', 'En proceso'], aprobado: ['ok', 'Identidad confirmada'], revision: ['espera', 'Requiere revisión manual'], rechazado: ['mal', 'No se pudo verificar'] };
-async function vistaVerificacion() {
+let sondeoKyc = 0;
+async function vistaVerificacion(params = new URLSearchParams()) {
   const v = await api('GET', '/api/verificacion');
+  // El resultado de Didit llega por webhook unos segundos después de que el mentor vuelve: se actualiza solo.
+  if (v.kyc.modo === 'didit' && v.kyc.estado === 'pendiente' && params.get('kyc') && sondeoKyc < 40) {
+    sondeoKyc++;
+    setTimeout(() => { if (location.hash.startsWith('#/verificacion')) enrutar(); }, 3000);
+  } else if (v.kyc.estado !== 'pendiente') sondeoKyc = 0;
   const doc = (t) => v.documentos.find((d) => d.tipo === t);
   const editable = ['sin_enviar', 'rechazado'].includes(v.estado);
   const ESTADOS = { sin_enviar: ['mal', 'Sin enviar'], pendiente: ['espera', 'En revisión'], verificado: ['ok', 'Verificado'], rechazado: ['mal', 'Rechazado'] };
@@ -374,6 +380,7 @@ async function vistaVerificacion() {
     <h1>Verificación de mentor</h1>
     <article class="tarjeta">
       <p>Estado: <span class="etiqueta ${ESTADOS[v.estado][0]}">${ESTADOS[v.estado][1]}</span></p>
+      ${params.get('kyc') && v.kyc.estado === 'pendiente' ? html`<p class="banner espera" role="status">Estamos procesando tu verificación de identidad. Esto toma unos segundos; esta página se actualiza sola.</p>` : ''}
       ${v.estado === 'rechazado' && v.nota ? html`<p class="error">Motivo: ${v.nota}. Corrige y vuelve a enviar.</p>` : ''}
       ${v.estado === 'pendiente' ? html`<p>Recibimos tu información. Un administrador la revisará pronto.</p>` : ''}
       ${v.estado === 'verificado' ? html`<p>Tu identidad fue verificada. Tus clases muestran la insignia <span class="verif">✓ Verificado</span>.</p>` : ''}
@@ -645,7 +652,7 @@ async function enrutar() {
       case 'empezar': await vistaEmpezar(); break;
       case 'perfil': vistaPerfil(); break;
       case 'suscripcion': await vistaSuscripcion(params); break;
-      case 'verificacion': await vistaVerificacion(); break;
+      case 'verificacion': await vistaVerificacion(params); break;
       case 'mis-clases': await vistaMisClases(arg); break;
       case 'horarios': await vistaHorarios(); break;
       case 'solicitudes': await vistaSolicitudes(); break;

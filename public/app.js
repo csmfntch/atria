@@ -377,9 +377,14 @@ async function vistaVerificacion(params = new URLSearchParams()) {
     </div>`;
   const k = KYC_TXT[v.kyc.estado] ?? KYC_TXT[''];
   const faltan = [];
-  if (!v.documento) faltan.push('guardar el número de tu cédula (botón «Guardar cédula»)');
-  if (conKyc) { if (!['aprobado', 'revision'].includes(v.kyc.estado)) faltan.push('completar la verificación de identidad (paso 2)'); }
-  else if (!doc('cedula')) faltan.push('subir la foto de tu cédula');
+  const nombreOk = yo.nombre.trim().split(/\s+/).length >= 2;
+  if (conKyc) {
+    if (!nombreOk) faltan.push('escribir tu nombre y apellido completos en tu perfil');
+    if (!['aprobado', 'revision'].includes(v.kyc.estado)) faltan.push('verificar tu identidad (paso 1)');
+  } else {
+    if (!v.documento) faltan.push('guardar el número de tu cédula (botón «Guardar cédula»)');
+    if (!doc('cedula')) faltan.push('subir la foto de tu cédula');
+  }
   if (!doc('titulo')) faltan.push('subir tu título o certificado');
   pintar(html`
     ${tabsCuenta('verificacion')}
@@ -392,6 +397,7 @@ async function vistaVerificacion(params = new URLSearchParams()) {
       ${v.estado === 'verificado' ? html`<p>Tu identidad fue verificada. Tus clases muestran la insignia <span class="verif">✓ Verificado</span>.</p>` : ''}
     </article>
     ${editable || v.estado === 'pendiente' ? html`
+    ${conKyc ? '' : html`
     <form class="tarjeta campos" data-form="documento">
       <h2>1. Tu cédula</h2>
       <div id="error"></div>
@@ -399,13 +405,16 @@ async function vistaVerificacion(params = new URLSearchParams()) {
       ${conKyc ? html`<p class="suave">Tu nombre en <a href="#/perfil">tu perfil</a> debe ser el mismo de tu cédula: <b>${yo.nombre}</b>. Si no coincide, la verificación pasará a revisión manual.</p>` : ''}
       ${editable ? html`<button class="btn sec chico">Guardar cédula</button>` : ''}
     </form>
+    `}
     ${conKyc ? html`
     <section class="tarjeta campos">
-      <h2>2. Verifica tu identidad</h2>
-      <p>Estado: <span class="etiqueta ${k[0]}">${k[1]}</span></p>
-      <p class="suave">Tomarás una foto de tu cédula y una selfie. Comprobamos que el documento sea real, que coincida con tu cédula y tu nombre, y que la selfie sea tuya.${v.kyc.auto ? ' Si todo coincide, tu cuenta se verifica automáticamente.' : ''}</p>
+      <h2>1. Verifica tu identidad</h2>
+      <p>Estado: <span class="etiqueta ${k[0]}">${k[1]}</span>${v.documento ? html` · Cédula verificada: <b>${v.documento}</b>` : ''}</p>
+      ${nombreOk ? html`<p class="suave">Tu nombre en <a href="#/perfil">tu perfil</a> es <b>${yo.nombre}</b>. Debe ser igual al de tu cédula; si no, el caso pasará a revisión manual.</p>`
+        : html`<p class="banner espera">Antes de empezar, escribe tu <b>nombre y apellido completos</b>, tal como aparecen en tu cédula, en <a href="#/perfil">tu perfil</a>.</p>`}
+      <p class="suave">No tienes que escribir tu número de cédula: lo leemos del documento. Tomarás una foto de tu cédula y una selfie. Comprobamos que el documento sea real, que coincida con tu cédula y tu nombre, y que la selfie sea tuya.${v.kyc.auto ? ' Si todo coincide, tu cuenta se verifica automáticamente.' : ''}</p>
       ${v.kyc.estado === 'revision' && v.kyc.motivos.length ? html`<div class="banner espera"><b>Un administrador revisará tu caso:</b>${v.kyc.motivos.map((m) => html`<p>${m}</p>`)}</div>` : ''}
-      ${editable ? html`<button class="btn ${v.kyc.estado === 'aprobado' ? 'sec' : ''}" data-accion="kyc-iniciar" ${v.documento ? '' : new Raw('disabled')}>${v.kyc.estado ? 'Repetir verificación' : 'Verificar mi identidad'}</button>` : ''}
+      ${editable ? html`<button class="btn ${v.kyc.estado === 'aprobado' ? 'sec' : ''}" data-accion="kyc-iniciar" ${nombreOk ? '' : new Raw('disabled')}>${v.kyc.estado ? 'Repetir verificación' : 'Verificar mi identidad'}</button>` : ''}
       ${v.kyc.modo === 'simulado' && v.kyc.estado === 'pendiente' ? html`
         <div class="banner"><b>Modo de pruebas</b> (sin documentos reales). Simula el resultado del proveedor:
           <div class="acciones-fila">
@@ -415,7 +424,7 @@ async function vistaVerificacion(params = new URLSearchParams()) {
           </div></div>` : ''}
     </section>` : ''}
     <section class="tarjeta campos">
-      <h2>${conKyc ? '3. Título o certificado' : '2. Documentos'}</h2>
+      <h2>${conKyc ? '2. Título o certificado' : '2. Documentos'}</h2>
       ${conKyc ? '' : paso('cedula', 'Foto de tu cédula (por ambos lados)', 'JPG, PNG o PDF, máximo 4 MB. Debe verse completa y legible.')}
       ${paso('titulo', 'Título, diploma o certificado', 'Del estudio o experiencia que respalda lo que enseñas (JPG, PNG o PDF, máximo 4 MB). Un administrador puede revisarlo.')}
       ${editable ? html`<button class="btn" data-accion="enviar-verificacion" ${v.completo ? '' : new Raw('disabled')}>${conKyc ? 'Terminar verificación' : 'Enviar a revisión'}</button>

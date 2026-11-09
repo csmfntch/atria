@@ -80,7 +80,7 @@ export function proveedorDidit({ apiKey, workflowId, webhookSecret, baseUrl, fet
           callback_method: 'both',
           language: 'es',
           contact_details: { email: usuario.email, send_notification_emails: false, email_lang: 'es' },
-          expected_details: { id_country: 'COL', identification_number: usuario.documento, expected_document_types: ['ID'] },
+          expected_details: { id_country: 'COL', ...(usuario.documento ? { identification_number: usuario.documento } : {}), expected_document_types: ['ID'] },
           metadata: { usuario_id: usuario.id },
         }),
       });

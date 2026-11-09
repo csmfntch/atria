@@ -1,7 +1,7 @@
 // Verificación de mentores: cédula + título/certificado, revisados por un administrador.
 import { randomBytes } from 'node:crypto';
 import { falla, json, redirigir, Resp, texto } from './helpers.mjs';
-import { evaluarResultado, resumen, normalizarNombre } from './kyc.mjs';
+import { evaluarResultado, resumen, normalizarNombre, primerNumero } from './kyc.mjs';
 
 const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'application/pdf': 'pdf' };
 
@@ -30,7 +30,9 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
   function procesarResultadoKyc(r) {
     const u = q('SELECT * FROM usuarios WHERE kyc_sesion = ? AND rol = ?').get(r.sesionId, 'profesor');
     if (!u || u.verificacion_estado === 'verificado') return null;
-    const decision = evaluarResultado(u, r);
+    const numero = primerNumero(r);
+    const duplicada = !!numero && !!q(`SELECT 1 FROM usuarios WHERE documento = ? AND id != ? AND rol = 'profesor'`).get(numero, u.id);
+    const decision = evaluarResultado(u, r, { duplicada });
     if (decision.kyc === 'pendiente') return decision;   // «en curso»: no pisa un resultado ya recibido
     // Los eventos pueden llegar desordenados: se ignora uno más antiguo que el ya guardado.
     try {
@@ -38,6 +40,8 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
       if (r.eventoTs && previo && r.eventoTs < previo) return null;
     } catch { /* sin resultado previo */ }
     q('UPDATE usuarios SET kyc_estado = ?, kyc_resultado = ? WHERE id = ?').run(decision.kyc, resumen(kyc?.nombre ?? 'proveedor', r, decision), u.id);
+    // La cédula verificada por el proveedor queda en el perfil del mentor (si aún no tenía una y nadie más la usa).
+    if (!u.documento && numero && !duplicada && decision.kyc !== 'rechazado') q('UPDATE usuarios SET documento = ? WHERE id = ?').run(numero, u.id);
     if (decision.kyc === 'rechazado' && u.verificacion_estado === 'pendiente')
       q(`UPDATE usuarios SET verificacion_estado = 'rechazado', verificacion_nota = ? WHERE id = ?`).run('No pudimos verificar tu identidad. Inténtalo de nuevo con buena luz y el documento completo.', u.id);
     if (decision.kyc === 'aprobado' && u.verificacion_estado === 'pendiente' && config.kycAutoAprobar && tieneTitulo(u.id))
@@ -50,7 +54,7 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
     const docs = documentosDe(usuario.id);
     const conKyc = !!kyc;
     const completo = conKyc
-      ? !!usuario.documento && docs.some((d) => d.tipo === 'titulo') && ['aprobado', 'revision'].includes(usuario.kyc_estado)
+      ? docs.some((d) => d.tipo === 'titulo') && ['aprobado', 'revision'].includes(usuario.kyc_estado)
       : !!usuario.documento && TIPOS_DOC.every((t) => docs.some((d) => d.tipo === t));
     return {
       estado: usuario.verificacion_estado, nota: usuario.verificacion_nota, documento: usuario.documento,
@@ -88,7 +92,6 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
     exigir(usuario, 'profesor');
     if (!kyc) falla(503, 'La verificación de identidad aún no está disponible.');
     if (usuario.verificacion_estado === 'verificado') falla(409, 'Tu cuenta ya está verificada.');
-    if (!usuario.documento) falla(400, 'Agrega el número de tu cédula antes de iniciar.');
     if (normalizarNombre(usuario.nombre).split(' ').filter(Boolean).length < 2) falla(400, 'Escribe tu nombre y apellido completos en tu perfil, como aparecen en tu cédula.');
     let sesion;
     try { sesion = await kyc.crearSesion({ usuario }); } catch (e) { console.error(e.message); falla(502, 'No pudimos iniciar la verificación. Inténtalo de nuevo.'); }
@@ -122,8 +125,8 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
   ruta('POST', '/api/verificacion/enviar', ({ usuario }) => {
     exigir(usuario, 'profesor');
     if (!['sin_enviar', 'rechazado'].includes(usuario.verificacion_estado)) falla(409, 'Ya enviaste tu verificación.');
-    if (!usuario.documento) falla(400, 'Agrega el número de tu cédula en tu perfil.');
     const docs = documentosDe(usuario.id);
+    if (!kyc && !usuario.documento) falla(400, 'Agrega el número de tu cédula en tu perfil.');
     if (kyc) {
       if (!docs.some((d) => d.tipo === 'titulo')) falla(400, 'Sube tu título o certificado.');
       if (usuario.kyc_estado === 'rechazado') falla(400, 'No se pudo verificar tu identidad. Inicia la verificación de nuevo.');

@@ -556,7 +556,7 @@ test('KYC: verificación automática cuando todo coincide, revisión manual si n
   const nuevoMentor = async (nombre, sufijo) => {
     const m = app.cliente();
     await m('POST', '/api/registro', { rol: 'profesor', nombre, email: `kyc${sufijo}@x.co`, password: 'clave12345' });
-    await m('PUT', '/api/perfil', { nombre, ciudad: 'Bogotá D.C.', documento: '52.123.456', materias: 'Matemáticas' });
+    await m('PUT', '/api/perfil', { nombre, ciudad: 'Bogotá D.C.', documento: `5212345${sufijo}`, materias: 'Matemáticas' });
     return m;
   };
   const admin = app.cliente();
@@ -607,7 +607,7 @@ test('KYC: verificación automática cuando todo coincide, revisión manual si n
   // 4) Validaciones al iniciar
   const sinDoc = app.cliente();
   await sinDoc('POST', '/api/registro', { rol: 'profesor', nombre: 'Juan Pérez', email: 'juan@x.co', password: 'clave12345' });
-  assert.equal((await sinDoc('POST', '/api/kyc/iniciar')).estado, 400, 'falta la cédula');
+  assert.equal((await sinDoc('POST', '/api/kyc/iniciar')).estado, 201, 'ya no hace falta escribir la cédula antes: sale del documento');
   await sinDoc('PUT', '/api/perfil', { nombre: 'Juan', documento: '123456' });
   const unNombre = await sinDoc('POST', '/api/kyc/iniciar');
   assert.equal(unNombre.estado, 400);
@@ -736,7 +736,8 @@ test('Didit: crear sesión, webhook firmado → verificación automática, y cas
   await enviarWebhook(app, eventoDidit({ session_id: 'sess-2' }));   // documento de Laura Gómez, cédula 52123456
   const v = (await p('GET', '/api/verificacion')).datos.kyc;
   assert.equal(v.estado, 'revision');
-  assert.equal(v.motivos.length, 2, 'cédula y nombre no coinciden');
+  assert.equal(v.motivos.length, 3, 'cédula, nombre y cédula ya usada por otra cuenta');
+  assert.match(v.motivos.join(' '), /otra cuenta/);
 
   // sin prueba de vida o sin rostro en el flujo → nunca se verifica solo
   const q2 = app.cliente();
@@ -753,7 +754,7 @@ test('Didit: crear sesión, webhook firmado → verificación automática, y cas
   // Didit rechaza el documento → el mentor puede reintentar
   const r = app.cliente();
   await r('POST', '/api/registro', { rol: 'profesor', nombre: 'Marta Ríos', email: 'm@x.co', password: 'clave12345' });
-  await r('PUT', '/api/perfil', { nombre: 'Marta Ríos', documento: '52123456' });
+  await r('PUT', '/api/perfil', { nombre: 'Marta Ríos', documento: '60123456' });
   await r('POST', '/api/kyc/iniciar');
   app.db.prepare(`UPDATE usuarios SET kyc_sesion = 'sess-4' WHERE email = 'm@x.co'`).run();
   await enviarWebhook(app, eventoDidit({ session_id: 'sess-4', status: 'Declined' }, { id_verifications: [{ status: 'Declined', warnings: [{ risk: 'DOCUMENT_EXPIRED' }] }] }));
@@ -761,7 +762,7 @@ test('Didit: crear sesión, webhook firmado → verificación automática, y cas
 
   // eventos desordenados: uno más antiguo no pisa el resultado reciente
   const t0 = Math.floor(Date.now() / 1000);
-  await enviarWebhook(app, eventoDidit({ session_id: 'sess-4', status: 'Approved', created_at: t0 + 100 }, { id_verifications: [{ status: 'Approved', document_number: '52123456', full_name: 'Marta Ríos' }] }));
+  await enviarWebhook(app, eventoDidit({ session_id: 'sess-4', status: 'Approved', created_at: t0 + 100 }, { id_verifications: [{ status: 'Approved', document_number: '60123456', full_name: 'Marta Ríos' }] }));
   assert.equal((await r('GET', '/api/verificacion')).datos.kyc.estado, 'aprobado');
   await enviarWebhook(app, eventoDidit({ session_id: 'sess-4', status: 'Declined', created_at: t0 + 50 }, {}));
   assert.equal((await r('GET', '/api/verificacion')).datos.kyc.estado, 'aprobado', 'el evento antiguo se ignora');
@@ -782,4 +783,39 @@ test('Didit: error del proveedor al crear la sesión no deja al mentor a medias'
   assert.equal(r.estado, 502);
   assert.doesNotMatch(JSON.stringify(r.datos), /workflow_id/, 'no filtra el detalle interno al usuario');
   assert.equal((await m('GET', '/api/verificacion')).datos.kyc.estado, '');
+});
+
+test('KYC: la cédula sale del documento verificado (sin escribirla antes) y no se repite entre cuentas', async (t) => {
+  const app = await iniciar({ kycSimulado: true }); t.after(app.cerrar);
+  const nuevo = async (nombre, correo) => {
+    const m = app.cliente();
+    await m('POST', '/api/registro', { rol: 'profesor', nombre, email: correo, password: 'clave12345' });
+    await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
+    return m;
+  };
+  const a = await nuevo('Camila Ortiz', 'c@x.co');
+  assert.equal((await a('GET', '/api/yo')).datos.usuario.documento, '', 'no tiene cédula escrita');
+  assert.equal((await a('POST', '/api/kyc/iniciar')).estado, 201);
+  assert.equal((await a('POST', '/api/verificacion/enviar')).estado, 400, 'falta la identidad');
+  assert.equal((await a('POST', '/api/kyc/simular', { desenlace: 'aprobado' })).datos.kyc_estado, 'aprobado');
+  assert.equal((await a('GET', '/api/yo')).datos.usuario.documento, '1020304050', 'la cédula verificada queda en el perfil');
+  assert.equal((await a('GET', '/api/verificacion')).datos.completo, true);
+  assert.equal((await a('POST', '/api/verificacion/enviar')).datos.estado, 'verificado');
+
+  // otra cuenta con la misma cédula verificada → administrador, y no se le asigna esa cédula
+  const b = await nuevo('Pedro Salazar', 'p@x.co');
+  await b('POST', '/api/kyc/iniciar');
+  const r = await b('POST', '/api/kyc/simular', { desenlace: 'aprobado' });
+  assert.equal(r.datos.kyc_estado, 'revision');
+  assert.match(r.datos.motivos.join(' '), /otra cuenta de mentor/);
+  assert.equal((await b('GET', '/api/yo')).datos.usuario.documento, '');
+  assert.equal((await b('POST', '/api/verificacion/enviar')).datos.estado, 'pendiente');
+
+  // sin proveedor (modo manual) la cédula sigue siendo obligatoria
+  const sin = await iniciar(); t.after(sin.cerrar);
+  const x = sin.cliente();
+  await x('POST', '/api/registro', { rol: 'profesor', nombre: 'Ana Ruiz', email: 'a@x.co', password: 'clave12345' });
+  await x('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
+  await x('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
+  assert.equal((await x('POST', '/api/verificacion/enviar')).estado, 400);
 });

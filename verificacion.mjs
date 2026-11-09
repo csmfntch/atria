@@ -54,7 +54,7 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
     const docs = documentosDe(usuario.id);
     const conKyc = !!kyc;
     const completo = conKyc
-      ? docs.some((d) => d.tipo === 'titulo') && ['aprobado', 'revision'].includes(usuario.kyc_estado)
+      ? TIPOS_DOC.every((t) => docs.some((d) => d.tipo === t)) && ['aprobado', 'revision'].includes(usuario.kyc_estado)
       : !!usuario.documento && TIPOS_DOC.every((t) => docs.some((d) => d.tipo === t));
     return {
       estado: usuario.verificacion_estado, nota: usuario.verificacion_nota, documento: usuario.documento,
@@ -128,6 +128,7 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
     const docs = documentosDe(usuario.id);
     if (!kyc && !usuario.documento) falla(400, 'Agrega el número de tu cédula en tu perfil.');
     if (kyc) {
+      if (!docs.some((d) => d.tipo === 'cedula')) falla(400, 'Sube la foto de tu cédula.');
       if (!docs.some((d) => d.tipo === 'titulo')) falla(400, 'Sube tu título o certificado.');
       if (usuario.kyc_estado === 'rechazado') falla(400, 'No se pudo verificar tu identidad. Inicia la verificación de nuevo.');
       if (!['aprobado', 'revision'].includes(usuario.kyc_estado)) falla(400, 'Completa primero la verificación de identidad.');

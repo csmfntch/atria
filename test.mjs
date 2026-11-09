@@ -568,6 +568,7 @@ test('KYC: verificación automática cuando todo coincide, revisión manual si n
   assert.equal((await m('GET', '/api/verificacion')).datos.kyc.modo, 'simulado');
   assert.equal((await m('POST', '/api/kyc/simular', { desenlace: 'aprobado' })).estado, 409, 'primero iniciar');
   assert.equal((await m('POST', '/api/verificacion/enviar')).estado, 400, 'falta el título');
+  await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
   await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
   assert.equal((await m('POST', '/api/verificacion/enviar')).estado, 400, 'falta la verificación de identidad');
   assert.equal((await m('POST', '/api/kyc/iniciar')).estado, 201);
@@ -581,6 +582,7 @@ test('KYC: verificación automática cuando todo coincide, revisión manual si n
 
   // 2) El documento es de otra persona → no se verifica solo: va al administrador con los motivos
   m = await nuevoMentor('Pedro Salazar', 2);
+  await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
   await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
   await m('POST', '/api/kyc/iniciar');
   r = await m('POST', '/api/kyc/simular', { desenlace: 'no_coincide' });
@@ -596,6 +598,7 @@ test('KYC: verificación automática cuando todo coincide, revisión manual si n
 
   // 3) El proveedor rechaza el documento → debe reintentar
   m = await nuevoMentor('Marta Ríos', 3);
+  await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
   await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
   await m('POST', '/api/kyc/iniciar');
   assert.equal((await m('POST', '/api/kyc/simular', { desenlace: 'rechazado' })).datos.kyc_estado, 'rechazado');
@@ -621,6 +624,7 @@ test('KYC: aprobación manual si se desactiva la automática, y sin simulación 
   const m = app.cliente();
   await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
   await m('PUT', '/api/perfil', { nombre: 'Laura Gómez', documento: '52123456' });
+  await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
   await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
   await m('POST', '/api/kyc/iniciar');
   await m('POST', '/api/kyc/simular', { desenlace: 'aprobado' });
@@ -694,6 +698,7 @@ test('Didit: crear sesión, webhook firmado → verificación automática, y cas
   const m = app.cliente();
   await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
   await m('PUT', '/api/perfil', { nombre: 'Laura Gómez', ciudad: 'Bogotá D.C.', documento: '52123456' });
+  await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
   await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
   assert.equal((await m('GET', '/api/verificacion')).datos.kyc.modo, 'didit');
 
@@ -790,6 +795,7 @@ test('KYC: la cédula sale del documento verificado (sin escribirla antes) y no 
   const nuevo = async (nombre, correo) => {
     const m = app.cliente();
     await m('POST', '/api/registro', { rol: 'profesor', nombre, email: correo, password: 'clave12345' });
+    await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
     await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
     return m;
   };
@@ -816,6 +822,26 @@ test('KYC: la cédula sale del documento verificado (sin escribirla antes) y no 
   const x = sin.cliente();
   await x('POST', '/api/registro', { rol: 'profesor', nombre: 'Ana Ruiz', email: 'a@x.co', password: 'clave12345' });
   await x('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
+  await x('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
   await x('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
   assert.equal((await x('POST', '/api/verificacion/enviar')).estado, 400);
+});
+
+test('la foto de la cédula y el título son obligatorios también con KYC', async (t) => {
+  const app = await iniciar({ kycSimulado: true }); t.after(app.cerrar);
+  const m = app.cliente();
+  await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Camila Ortiz', email: 'c@x.co', password: 'clave12345' });
+  await m('POST', '/api/kyc/iniciar');
+  await m('POST', '/api/kyc/simular', { desenlace: 'aprobado' });
+  assert.equal((await m('GET', '/api/verificacion')).datos.completo, false, 'identidad ok pero sin documentos');
+  let r = await m('POST', '/api/verificacion/enviar');
+  assert.equal(r.estado, 400);
+  assert.match(r.datos.error, /cédula/);
+  await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
+  r = await m('POST', '/api/verificacion/enviar');
+  assert.equal(r.estado, 400, 'con solo la cédula tampoco alcanza');
+  assert.match(r.datos.error, /título/);
+  await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
+  assert.equal((await m('GET', '/api/verificacion')).datos.completo, true);
+  assert.equal((await m('POST', '/api/verificacion/enviar')).datos.estado, 'verificado');
 });

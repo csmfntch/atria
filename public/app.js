@@ -381,10 +381,8 @@ async function vistaVerificacion(params = new URLSearchParams()) {
   if (conKyc) {
     if (!nombreOk) faltan.push('escribir tu nombre y apellido completos en tu perfil');
     if (!['aprobado', 'revision'].includes(v.kyc.estado)) faltan.push('verificar tu identidad (paso 1)');
-  } else {
-    if (!v.documento) faltan.push('guardar el número de tu cédula (botón «Guardar cédula»)');
-    if (!doc('cedula')) faltan.push('subir la foto de tu cédula');
-  }
+  } else if (!v.documento) faltan.push('guardar el número de tu cédula (botón «Guardar cédula»)');
+  if (!doc('cedula')) faltan.push('subir la foto de tu cédula');
   if (!doc('titulo')) faltan.push('subir tu título o certificado');
   pintar(html`
     ${tabsCuenta('verificacion')}
@@ -424,9 +422,10 @@ async function vistaVerificacion(params = new URLSearchParams()) {
           </div></div>` : ''}
     </section>` : ''}
     <section class="tarjeta campos">
-      <h2>${conKyc ? '2. Título o certificado' : '2. Documentos'}</h2>
-      ${conKyc ? '' : paso('cedula', 'Foto de tu cédula (por ambos lados)', 'JPG, PNG o PDF, máximo 4 MB. Debe verse completa y legible.')}
-      ${paso('titulo', 'Título, diploma o certificado', 'Del estudio o experiencia que respalda lo que enseñas (JPG, PNG o PDF, máximo 4 MB). Un administrador puede revisarlo.')}
+      <h2>2. Documentos <span class="etiqueta mal">Obligatorios</span></h2>
+      <p class="suave">Para publicar tus clases necesitamos <b>los dos documentos</b>. Un administrador los puede revisar.</p>
+      ${paso('cedula', 'Foto de tu cédula (por ambos lados) *', 'JPG, PNG o PDF, máximo 4 MB. Debe verse completa y legible.')}
+      ${paso('titulo', 'Título, diploma o certificado *', 'Del estudio o experiencia que respalda lo que enseñas (JPG, PNG o PDF, máximo 4 MB).')}
       ${editable ? html`<button class="btn" data-accion="enviar-verificacion" ${v.completo ? '' : new Raw('disabled')}>${conKyc ? 'Terminar verificación' : 'Enviar a revisión'}</button>
         ${v.completo ? '' : html`<p class="banner espera" role="status">Para continuar falta: ${faltan.join(', ')}.</p>`}
         <p class="suave">Solo el equipo de Artia ve tus documentos. No se muestran en tu perfil público.</p>` : ''}

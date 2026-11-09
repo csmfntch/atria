@@ -475,3 +475,44 @@ test('primeros pasos y precios por defecto', async (t) => {
   assert.deepEqual(u.pasos.map((p) => p.id), ['perfil', 'verificacion', 'suscripcion', 'clase', 'horarios']);
   assert.ok(u.pasos.every((p) => !p.ok));
 });
+
+test('documentos de verificación en almacenamiento privado (Supabase Storage)', async (t) => {
+  const objetos = new Map(); let fallar = false;
+  const almacen = {
+    async guardar(ruta, buf, mime) { if (fallar) throw new Error('caído'); objetos.set(ruta, { buf, mime }); },
+    async leer(ruta) { return objetos.get(ruta).buf; },
+    async borrar(ruta) { objetos.delete(ruta); },
+  };
+  const app = await iniciar({ adminEmails: ['admin@x.co'] }, { almacen }); t.after(app.cerrar);
+  const m = app.cliente(); await registrar(m, 'profesor', 'Pedro');
+  const id = (await m('GET', '/api/yo')).datos.usuario.id;
+
+  assert.equal((await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG)).estado, 201);
+  const fila = app.db.prepare(`SELECT datos, ruta FROM documentos WHERE usuario_id = ?`).get(id);
+  assert.equal(fila.datos.length, 0, 'el archivo no queda en la base de datos');
+  assert.match(fila.ruta, new RegExp(`^${id}/cedula-[0-9a-f]{16}\\.png$`));
+  assert.equal(objetos.get(fila.ruta).mime, 'image/png');
+
+  // reemplazar borra el objeto anterior
+  await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
+  assert.equal(objetos.size, 1);
+  assert.ok(!objetos.has(fila.ruta));
+
+  // si el almacenamiento falla no se pierde el documento anterior ni queda una fila rota
+  fallar = true;
+  assert.equal((await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG)).estado, 502);
+  fallar = false;
+  assert.equal(app.db.prepare(`SELECT COUNT(*) n FROM documentos WHERE usuario_id = ?`).get(id).n, 1);
+
+  // el administrador lee el archivo desde el almacén
+  await m('PUT', '/api/perfil', { nombre: 'Pedro', documento: '80111222' });
+  await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
+  await m('POST', '/api/verificacion/enviar');
+  const admin = app.cliente();
+  await admin('POST', '/api/registro', { rol: 'estudiante', nombre: 'Admin', email: 'admin@x.co', password: 'clave12345', colegio_tipo: 'ninguno' });
+  const lista = (await admin('GET', '/api/admin/verificaciones')).datos.mentores[0];
+  const doc = await admin('GET', `/api/admin/documentos/${lista.documentos[0].id}`);
+  assert.equal(doc.estado, 200);
+  assert.deepEqual(doc.datos, PNG);
+  assert.equal(doc.cabeceras.get('content-type'), 'image/png');
+});

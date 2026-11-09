@@ -1,5 +1,8 @@
 // Verificación de mentores: cédula + título/certificado, revisados por un administrador.
+import { randomBytes } from 'node:crypto';
 import { falla, json, Resp, texto } from './helpers.mjs';
+
+const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'application/pdf': 'pdf' };
 
 const MAX_DOC = 4 * 1024 * 1024; // 4 MB
 const TIPOS_DOC = ['cedula', 'titulo'];
@@ -12,7 +15,7 @@ export function tipoArchivo(buf) {
   return null;
 }
 
-export function registrarVerificacion({ q, ruta, exigir, exigirAdmin }) {
+export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen }) {
   const documentosDe = (uid) => q('SELECT id, tipo, mime, creado FROM documentos WHERE usuario_id = ? ORDER BY id').all(uid);
 
   ruta('GET', '/api/verificacion', ({ usuario }) => {
@@ -24,15 +27,27 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin }) {
     };
   });
 
-  ruta('POST', '/api/verificacion/documentos', ({ usuario, query, body }) => {
+  ruta('POST', '/api/verificacion/documentos', async ({ usuario, query, body }) => {
     exigir(usuario, 'profesor');
     if (!['sin_enviar', 'rechazado'].includes(usuario.verificacion_estado))
       falla(409, usuario.verificacion_estado === 'pendiente' ? 'Tu verificación está en revisión.' : 'Tu cuenta ya está verificada.');
     const tipo = TIPOS_DOC.includes(query.tipo) ? query.tipo : falla(400, 'Tipo de documento no válido.');
     if (!Buffer.isBuffer(body) || !body.length) falla(400, 'Adjunta un archivo.');
     const mime = tipoArchivo(body) ?? falla(415, 'El archivo debe ser una imagen JPG, PNG o un PDF.');
-    q('DELETE FROM documentos WHERE usuario_id = ? AND tipo = ?').run(usuario.id, tipo);
-    const { lastInsertRowid } = q('INSERT INTO documentos (usuario_id, tipo, mime, datos) VALUES (?,?,?,?)').run(usuario.id, tipo, mime, body);
+    // Con Supabase el archivo va al bucket privado; si no, a la base de datos local (desarrollo).
+    let rutaObjeto = '', datos = body;
+    if (almacen) {
+      rutaObjeto = `${usuario.id}/${tipo}-${randomBytes(8).toString('hex')}.${EXT[mime]}`;
+      try { await almacen.guardar(rutaObjeto, body, mime); }
+      catch (e) { console.error(e.message); falla(502, 'No pudimos guardar el documento. Inténtalo de nuevo.'); }
+      datos = Buffer.alloc(0);
+    }
+    const previos = q('SELECT id, ruta FROM documentos WHERE usuario_id = ? AND tipo = ?').all(usuario.id, tipo);
+    const { lastInsertRowid } = q('INSERT INTO documentos (usuario_id, tipo, mime, datos, ruta) VALUES (?,?,?,?,?)').run(usuario.id, tipo, mime, datos, rutaObjeto);
+    for (const d of previos) {
+      q('DELETE FROM documentos WHERE id = ?').run(d.id);
+      if (d.ruta && almacen) await almacen.borrar(d.ruta).catch((e) => console.error(e.message));
+    }
     return json(201, { id: Number(lastInsertRowid), tipo, mime });
   }, { binario: MAX_DOC });
 
@@ -55,13 +70,18 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin }) {
     return { mentores: mentores.map((m) => ({ ...m, documentos: documentosDe(m.id) })) };
   });
 
-  ruta('GET', '/api/admin/documentos/(\\d+)', ({ usuario, params }) => {
+  ruta('GET', '/api/admin/documentos/(\\d+)', async ({ usuario, params }) => {
     exigirAdmin(usuario);
-    const d = q('SELECT mime, datos FROM documentos WHERE id = ?').get(params[0]) ?? falla(404, 'Documento no encontrado.');
+    const d = q('SELECT mime, datos, ruta FROM documentos WHERE id = ?').get(params[0]) ?? falla(404, 'Documento no encontrado.');
+    let contenido;
+    if (d.ruta) {
+      if (!almacen) falla(503, 'El almacenamiento de documentos no está configurado.');
+      try { contenido = await almacen.leer(d.ruta); } catch (e) { console.error(e.message); falla(502, 'No pudimos leer el documento.'); }
+    } else contenido = Buffer.from(d.datos);
     return new Resp(200, {
       'Content-Type': d.mime, 'Cache-Control': 'private, no-store',
       'Content-Security-Policy': "default-src 'none'; sandbox", 'Content-Disposition': 'inline',
-    }, Buffer.from(d.datos));
+    }, contenido);
   });
 
   ruta('PUT', '/api/admin/verificaciones/(\\d+)', ({ usuario, params, body }) => {

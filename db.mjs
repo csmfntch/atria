@@ -105,7 +105,8 @@ export function abrirBD(ruta) {
       usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
       tipo       TEXT NOT NULL CHECK (tipo IN ('cedula','titulo')),
       mime       TEXT NOT NULL,
-      datos      BLOB NOT NULL,
+      datos      BLOB NOT NULL,           -- vacío cuando el archivo está en Supabase Storage
+      ruta       TEXT NOT NULL DEFAULT '', -- ruta en el bucket privado (si aplica)
       creado     TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -175,6 +176,7 @@ export function abrirBD(ruta) {
     ['es_menor', 'INTEGER NOT NULL DEFAULT 0'], ['acudiente_nombre', `TEXT NOT NULL DEFAULT ''`],
     ['acudiente_celular', `TEXT NOT NULL DEFAULT ''`],
   ]) agregarColumna(db, 'usuarios', col, def);
+  agregarColumna(db, 'documentos', 'ruta', `TEXT NOT NULL DEFAULT ''`);
 
   return db;
 }

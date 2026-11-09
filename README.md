@@ -67,15 +67,21 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 - `db.mjs`, `colombia.mjs`, `helpers.mjs` — esquema SQLite, datos de Colombia (ciudades, 20 localidades de Bogotá), utilidades.
 - `public/` — interfaz (HTML/CSS/JS sin build, rutas con `#`). `demo.mjs`, `test.mjs`.
 
-## Supabase (siguiente paso)
+## Supabase
 
-Hoy los datos viven en SQLite (un archivo en disco). Para producción conviene Supabase: base de datos administrada y **Storage privado para las cédulas y títulos** (hoy van en la BD sin cifrar). Está preparado `supabase/schema.sql` (tablas, RLS activado sin políticas, bucket privado `documentos-verificacion`). Falta portar la capa de datos del servidor a Postgres (`@supabase/supabase-js` o `pg`) y probarla contra el proyecto: necesita `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` (ver `.env.example`; la llave `service_role` nunca debe llegar al navegador).
+Proyecto conectado y esquema creado (`supabase/schema.sql`: 11 tablas con RLS activado y sin políticas, y el bucket privado `documentos-verificacion`).
+
+**Ya funciona:** los documentos de verificación (cédula y título) se guardan en el **bucket privado de Supabase Storage** cuando el servidor arranca con `SUPABASE_URL` (y `SUPABASE_SERVICE_ROLE_KEY` con la llave secreta). Sin esas variables se guardan en la base local (modo desarrollo). Solo el administrador puede leerlos, a través del servidor; el bucket no tiene acceso público. Probado contra el proyecto real: subir, reemplazar (borra el anterior), leer y confirmar que la URL pública falla.
+
+**Falta:** portar el resto de los datos (usuarios, clases, reservas, pagos…) de SQLite a Supabase. Es un cambio grande porque muchas consultas hacen uniones, promedios de reseñas y cruces de horarios que la API web de Supabase no resuelve sola: requiere vistas y funciones SQL en Postgres, reescribir los manejadores como asíncronos y decidir cómo probarlo (el proyecto real o una base local). Mientras tanto el servidor necesita disco persistente para el archivo SQLite.
+
+La llave secreta (`sb_secret_…` / `service_role`) vive solo en el servidor y nunca debe llegar al navegador ni a GitHub.
 
 ## Pendiente antes de producción
 
 - **Hosting:** servidor Node con disco persistente (Render, Railway, Fly.io, VPS).
 - **Cobro recurrente automático:** hoy cada mes se renueva con un pago manual. El débito automático requiere fuentes de pago tokenizadas de Wompi.
-- **Documentos sensibles:** las cédulas se guardan en la base de datos sin cifrar. Cifra el disco/la BD, limita el acceso y define cuánto tiempo las conservas.
+- **Documentos sensibles:** con Supabase quedan en un bucket privado; define cuánto tiempo conservas las cédulas tras verificar (y bórralas cuando ya no se necesiten). Sin Supabase se guardan en la base local sin cifrar.
 - **Menores de edad y datos personales:** valida con un abogado el consentimiento del acudiente y la política de tratamiento de datos (Ley 1581 de 2012, Habeas Data; datos de menores). Falta redactar términos y política.
 - Correo de verificación y recuperación de contraseña, notificaciones por correo/WhatsApp, moderación de reseñas, recordatorios de clase.
 - Detrás de un proxy, el límite de intentos de login usa la IP del socket: configura el proxy para pasar la IP real.

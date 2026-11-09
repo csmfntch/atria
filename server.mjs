@@ -16,6 +16,7 @@ import {
 import { registrarAgenda } from './agenda.mjs';
 import { registrarSuscripcion } from './suscripcion.mjs';
 import { registrarVerificacion } from './verificacion.mjs';
+import { crearAlmacen } from './almacen.mjs';
 
 export { hashClave };
 
@@ -43,7 +44,7 @@ export function configDesdeEnv(env = process.env) {
 }
 
 // ---------- aplicación ----------
-export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch } = {}) {
+export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, almacen = null } = {}) {
   const config = { ...configDesdeEnv({}), ...configParcial };
   const q = (sql) => db.prepare(sql);
   const intentos = new Map(); // limitador simple de inicio de sesión: ip -> {n, hasta}
@@ -145,7 +146,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch } 
   const rutas = [];
   const ruta = (metodo, patron, fn, opciones = {}) => rutas.push({ metodo, re: new RegExp(`^${patron}$`), fn, ...opciones });
   const ctx = {
-    db, q, ruta, config, fetchFn, SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
+    db, q, ruta, config, fetchFn, almacen, SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
     exigir, exigirAdmin, exigirSuscripcion, exigirMentorActivo, perfilEstudianteFalta, resumenResenas,
   };
 
@@ -443,6 +444,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const puerto = Number(process.env.PORT ?? 3100);
   const config = configDesdeEnv();
   if (config.seguro && !config.wompi) console.warn('⚠ WOMPI_PUBLIC_KEY / WOMPI_INTEGRITY_SECRET no configurados: no se podrán cobrar suscripciones.');
-  createServer(crearApp(db, config)).listen(puerto, () =>
-    console.log(`Artia en http://localhost:${puerto}  (BD: ${rutaBD}${config.wompi ? ', Wompi activo' : config.pagosSimulados ? ', pagos simulados' : ''})`));
+  // Documentos de verificación: Supabase Storage (bucket privado) si hay SUPABASE_URL; si no, la base local.
+  const almacen = process.env.SUPABASE_URL ? crearAlmacen({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }) : null;
+  createServer(crearApp(db, config, { almacen })).listen(puerto, () =>
+    console.log(`Artia en http://localhost:${puerto}  (BD: ${rutaBD}${config.wompi ? ', Wompi activo' : config.pagosSimulados ? ', pagos simulados' : ''}${almacen ? ', documentos en Supabase Storage' : ''})`));
 }

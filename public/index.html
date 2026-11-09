@@ -3,19 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Atria — clases con profesores en Colombia</title>
+  <title>Atria — el arte de aprender</title>
   <meta name="description" content="Conecta con profesores y estudiantes en toda Colombia. Clases virtuales y presenciales, precios en pesos colombianos.">
   <meta name="theme-color" content="#432C7A">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="barra">
-    <a class="logo" href="#/">📚 Atria</a>
+    <a class="logo" href="#/" aria-label="Atria, inicio">
+      <img src="/logo.svg" alt="" width="34" height="34">
+      <span class="marca">ATRIA<small>El arte de aprender</small></span>
+    </a>
     <nav id="nav" aria-label="Principal"></nav>
   </header>
   <main id="app" tabindex="-1"></main>
   <div id="aviso" role="status" aria-live="polite"></div>
-  <footer class="pie">Atria · Precios en pesos colombianos (COP) · Los pagos se acuerdan directamente entre profesor y estudiante.</footer>
+  <footer class="pie">
+    <img src="/logo.svg" alt="" width="28" height="28" class="pie-logo">
+    <div>ATRIA · El arte de aprender</div>
+    <div>Precios en pesos colombianos (COP) · Los pagos se acuerdan directamente entre profesor y estudiante.</div>
+  </footer>
   <script src="/app.js" type="module"></script>
 </body>
 </html>

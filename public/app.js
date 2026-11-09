@@ -68,7 +68,7 @@ async function vistaInicio() {
       <p>Clases virtuales y presenciales en tu ciudad, a precios en pesos colombianos. Si enseñas, publica tus clases y encuentra estudiantes.</p>
       <div class="acciones">
         <a class="btn claro" href="#/clases">Buscar clases</a>
-        ${yo ? '' : html`<a class="btn sec" style="color:#fff;border-color:#fff" href="#/registro?rol=profesor">Quiero dar clases</a>`}
+        ${yo ? '' : html`<a class="btn sec" href="#/registro?rol=profesor">Quiero dar clases</a>`}
       </div>
     </section>
     <h2>Clases recientes</h2>

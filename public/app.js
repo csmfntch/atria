@@ -1,4 +1,4 @@
-// Atria — interfaz (español, COP). Rutas con hash: #/clases, #/perfil, ...
+// Artia — interfaz (español, COP). Rutas con hash: #/clases, #/perfil, ...
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
 const $aviso = document.getElementById('aviso');
@@ -64,11 +64,11 @@ async function vistaInicio() {
   const { clases } = await api('GET', '/api/clases');
   pintar(html`
     <section class="hero">
-      <h1>Aprende con los mejores profesores de Colombia</h1>
-      <p>Clases virtuales y presenciales en tu ciudad, a precios en pesos colombianos. Si enseñas, publica tus clases y encuentra estudiantes.</p>
+      <h1>El arte de <br><em>aprender.</em></h1>
+      <p>Conecta con profesores, creadores y mentores de toda Colombia para dominar nuevas habilidades y oficios. Clases virtuales y presenciales, en pesos colombianos.</p>
       <div class="acciones">
-        <a class="btn claro" href="#/clases">Buscar clases</a>
-        ${yo ? '' : html`<a class="btn sec" href="#/registro?rol=profesor">Quiero dar clases</a>`}
+        <a class="btn morado" href="#/clases">Encontrar una clase</a>
+        <a class="btn sec" href="${yo?.rol === 'profesor' ? '#/mis-clases' : yo ? '#/solicitudes' : '#/registro?rol=profesor'}">${yo?.rol === 'estudiante' ? 'Publicar lo que busco' : 'Conviértete en mentor'}</a>
       </div>
     </section>
     <h2>Clases recientes</h2>

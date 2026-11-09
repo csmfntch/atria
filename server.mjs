@@ -1,4 +1,4 @@
-// Servidor de Atria: API JSON + archivos estáticos, sin dependencias.
+// Servidor de Artia: API JSON + archivos estáticos, sin dependencias.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -374,10 +374,10 @@ export function crearApp(db, { seguro = false } = {}) {
 
 // ---------- arranque ----------
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const ruta = process.env.DB_PATH ?? join(aqui, 'data', 'atria.db');
+  const ruta = process.env.DB_PATH ?? join(aqui, 'data', 'artia.db');
   const db = abrirBD(ruta);
   if (process.argv.includes('--demo')) (await import('./demo.mjs')).sembrar(db, { hashClave });
   const puerto = Number(process.env.PORT ?? 3100);
   createServer(crearApp(db, { seguro: process.env.NODE_ENV === 'production' }))
-    .listen(puerto, () => console.log(`Atria en http://localhost:${puerto}  (BD: ${ruta})`));
+    .listen(puerto, () => console.log(`Artia en http://localhost:${puerto}  (BD: ${ruta})`));
 }

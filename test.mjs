@@ -120,7 +120,7 @@ test('sesión, logout y rutas protegidas', async () => {
 test('archivos estáticos y 404', async () => {
   const idx = await fetch(base + '/');
   assert.equal(idx.status, 200);
-  assert.match(await idx.text(), /Atria/);
+  assert.match(await idx.text(), /Artia/);
   assert.equal((await fetch(base + '/no-existe.js')).status, 404);
   assert.equal((await fetch(base + '/api/nada')).status, 404);
   const trav = await fetch(base + '/..%2f..%2fpackage.json');

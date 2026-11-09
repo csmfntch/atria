@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none" stroke="#FFC72C" stroke-width="1.6" stroke-linejoin="miter">
-  <rect x="5" y="5" width="30" height="30"/>
-  <path d="M20 5 35 20 20 35 5 20Z"/>
-  <path d="M20 5V35M5 20H35" stroke-width="1"/>
-  <path d="M20 12.5 27.5 20 20 27.5 12.5 20Z" stroke-width="1"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none" stroke-linejoin="miter">
+  <rect x="5" y="5" width="30" height="30" stroke="#432C7A" stroke-width="1.8"/>
+  <path d="M20 5 35 20 20 35 5 20Z" stroke="#432C7A" stroke-width="1.8"/>
+  <path d="M20 5V35M5 20H35" stroke="#432C7A" stroke-width="1"/>
+  <path d="M20 12.5 27.5 20 20 27.5 12.5 20Z" stroke="#FFC72C" stroke-width="2"/>
 </svg>

@@ -1,4 +1,4 @@
-# Atria
+# Artia
 
 Plataforma en español para conectar **profesores** y **estudiantes** en Colombia. Precios en COP, ciudades colombianas, celulares con formato `3XX XXX XXXX` y contacto por WhatsApp.
 
@@ -30,7 +30,7 @@ npm test          # pruebas de la API
 
 Cuentas de ejemplo (contraseña `demo12345`): `laura@demo.co`, `andres@demo.co`, `camila@demo.co` (profesores) y `sofia@demo.co` (estudiante).
 
-Variables de entorno: `PORT` (3100), `DB_PATH` (`data/atria.db`), `NODE_ENV=production` (cookies `Secure`, requiere HTTPS).
+Variables de entorno: `PORT` (3100), `DB_PATH` (`data/artia.db`), `NODE_ENV=production` (cookies `Secure`, requiere HTTPS).
 
 ## Estructura
 

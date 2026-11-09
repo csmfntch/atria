@@ -1,8 +1,8 @@
 {
-  "name": "atria",
+  "name": "artia",
   "version": "1.0.0",
   "private": true,
-  "description": "Atria — plataforma de clases entre profesores y estudiantes en Colombia",
+  "description": "Artia — plataforma de clases entre profesores y estudiantes en Colombia",
   "type": "module",
   "scripts": {
     "start": "node server.mjs",

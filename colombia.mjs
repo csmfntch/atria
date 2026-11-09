@@ -57,3 +57,6 @@ export function normalizarCelular(valor) {
   if (d.length === 12 && d.startsWith('57')) d = d.slice(2);
   return /^3\d{9}$/.test(d) ? d : null;
 }
+
+// Versión vigente de los Términos y la Política de privacidad. Súbela cuando cambien los textos: se pedirá aceptarlos de nuevo.
+export const TERMINOS_VERSION = '2026-11-09';

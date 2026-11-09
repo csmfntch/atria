@@ -90,6 +90,12 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 
 También sirve cualquier host con servidor Node y volumen persistente (Fly.io, un VPS…). **No uses hosting estático** (Netlify, Vercel…): Artia necesita un servidor Node.
 
+## Términos, privacidad y autorizaciones
+
+- **Al crear la cuenta** es obligatorio aceptar los *Términos y Condiciones* y la *Política de Tratamiento de Datos* (casilla). Se guarda la **versión** y la **fecha y hora**. Los **mentores** además dan una **autorización expresa** para tratar su cédula, selfie (dato biométrico, sensible) y título; esa autorización se guarda con fecha, se exige antes de subir documentos o iniciar la verificación, y se informa a Didit como consentimiento ya recogido. Los estudiantes menores de edad registran a su acudiente.
+- Las páginas están en `#/terminos` y `#/privacidad` (enlaces también en el pie). El texto vive en `public/legal.js` y es un **BORRADOR**: debe revisarlo un abogado colombiano y completarse (razón social, NIT, dirección, correo, ciudad, plazos de conservación, política de reembolsos). Cuando esté aprobado, pon `BORRADOR = false`.
+- Si cambias el contenido legal, sube `TERMINOS_VERSION` en `colombia.mjs`: a todos los usuarios se les pedirá aceptar de nuevo.
+
 ## Conectar Didit (KYC)
 
 1. En la [consola de Didit](https://business.didit.me) crea un **workflow** de verificación (KYC) que incluya: verificación del documento (ID), prueba de vida (liveness), comparación de rostro (face match) y, si está disponible para Colombia, validación de la cédula contra el registro (database validation). Si falta liveness o face match, el mentor nunca se verifica solo: pasa a revisión manual.

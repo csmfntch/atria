@@ -23,6 +23,9 @@ create table if not exists usuarios (
   documento   text not null default '',
   verificacion_estado text not null default 'sin_enviar' check (verificacion_estado in ('sin_enviar','pendiente','verificado','rechazado')),
   verificacion_nota   text not null default '',
+  terminos_version text not null default '',
+  terminos_fecha   text not null default '',
+  verificacion_autorizada text not null default '',
   kyc_estado    text not null default '' check (kyc_estado in ('','pendiente','aprobado','revision','rechazado')),
   kyc_sesion    text not null default '',
   kyc_resultado text not null default '',   -- resumen JSON de la decisión (sin imágenes)

@@ -34,6 +34,9 @@ export function abrirBD(ruta) {
       verificacion_estado TEXT NOT NULL DEFAULT 'sin_enviar'
                  CHECK (verificacion_estado IN ('sin_enviar','pendiente','verificado','rechazado')),
       verificacion_nota   TEXT NOT NULL DEFAULT '',
+      terminos_version TEXT NOT NULL DEFAULT '',        -- versión de Términos y Privacidad aceptada
+      terminos_fecha   TEXT NOT NULL DEFAULT '',        -- cuándo (UTC)
+      verificacion_autorizada TEXT NOT NULL DEFAULT '', -- cuándo el mentor autorizó verificar su identidad (UTC)
       kyc_estado    TEXT NOT NULL DEFAULT '',   -- '', pendiente, aprobado, revision, rechazado
       kyc_sesion    TEXT NOT NULL DEFAULT '',   -- id de la sesión en el proveedor
       kyc_resultado TEXT NOT NULL DEFAULT '',   -- resumen JSON de la decisión (sin imágenes)
@@ -178,6 +181,7 @@ export function abrirBD(ruta) {
     ['localidad', `TEXT NOT NULL DEFAULT ''`], ['grado', `TEXT NOT NULL DEFAULT ''`],
     ['es_menor', 'INTEGER NOT NULL DEFAULT 0'], ['acudiente_nombre', `TEXT NOT NULL DEFAULT ''`],
     ['acudiente_celular', `TEXT NOT NULL DEFAULT ''`],
+    ['terminos_version', `TEXT NOT NULL DEFAULT ''`], ['terminos_fecha', `TEXT NOT NULL DEFAULT ''`], ['verificacion_autorizada', `TEXT NOT NULL DEFAULT ''`],
     ['kyc_estado', `TEXT NOT NULL DEFAULT ''`], ['kyc_sesion', `TEXT NOT NULL DEFAULT ''`], ['kyc_resultado', `TEXT NOT NULL DEFAULT ''`],
   ]) agregarColumna(db, 'usuarios', col, def);
   agregarColumna(db, 'documentos', 'ruta', `TEXT NOT NULL DEFAULT ''`);

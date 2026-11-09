@@ -10,6 +10,7 @@
 // secreto. NO se acepta X-Signature-Simple: solo firma el sobre y no el cuerpo (la decisión), así que no sirve
 // para decidir una verificación de identidad.
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { TERMINOS_VERSION } from './colombia.mjs';
 
 const API = 'https://verification.didit.me';
 const TOLERANCIA_S = 300;
@@ -82,6 +83,8 @@ export function proveedorDidit({ apiKey, workflowId, webhookSecret, baseUrl, fet
           contact_details: { email: usuario.email, send_notification_emails: false, email_lang: 'es' },
           expected_details: { id_country: 'COL', ...(usuario.documento ? { identification_number: usuario.documento } : {}), expected_document_types: ['ID'] },
           metadata: { usuario_id: usuario.id },
+          // Ya recogimos la autorización expresa del mentor: Didit no la vuelve a pedir y la deja registrada en la decisión.
+          ...(usuario.verificacion_autorizada ? { biometric_consent: { given_at: new Date(usuario.verificacion_autorizada.replace(' ', 'T') + 'Z').toISOString(), text_version: TERMINOS_VERSION } } : {}),
         }),
       });
       if (!r.ok) throw new Error(`Didit ${r.status}: ${(await r.text()).slice(0, 200)}`);

@@ -36,7 +36,7 @@ async function iniciar(config = {}, deps = {}) {
 }
 
 const registrar = (c, rol, n, extra = {}) => c('POST', '/api/registro',
-  { rol, nombre: n, email: `${n.toLowerCase().replace(/\W/g, '')}@x.co`, password: 'clave12345', ...(rol === 'estudiante' ? { colegio_tipo: 'publico' } : {}), ...extra });
+  { acepta_terminos: true, autoriza_verificacion: true, rol, nombre: n, email: `${n.toLowerCase().replace(/\W/g, '')}@x.co`, password: 'clave12345', ...(rol === 'estudiante' ? { colegio_tipo: 'publico' } : {}), ...extra });
 
 const pagarSimulado = async (c) => {
   const p = await c('POST', '/api/pagos/iniciar');
@@ -94,7 +94,7 @@ test('registro, ingreso por rol y colegio del estudiante', async (t) => {
   assert.equal((await app.cliente()('POST', '/api/login', { email: 'luis@x.co', password: 'mala' })).estado, 401);
 
   const admin = app.cliente();
-  assert.equal((await admin('POST', '/api/registro', { rol: 'estudiante', nombre: 'Jefa', email: 'jefa@x.co', password: 'clave12345', colegio_tipo: 'ninguno' })).datos.usuario.es_admin, true);
+  assert.equal((await admin('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'estudiante', nombre: 'Jefa', email: 'jefa@x.co', password: 'clave12345', colegio_tipo: 'ninguno' })).datos.usuario.es_admin, true);
 });
 
 test('perfil del estudiante: colegio público/privado, localidad de Bogotá y acudiente', async (t) => {
@@ -145,7 +145,7 @@ test('verificación del mentor: documentos, revisión del administrador y visibi
   assert.equal((await e('GET', '/api/admin/verificaciones')).estado, 403);
   assert.equal((await m('GET', '/api/admin/verificaciones')).estado, 403);
   const admin = app.cliente();
-  await admin('POST', '/api/registro', { rol: 'estudiante', nombre: 'Admin', email: 'admin@x.co', password: 'clave12345', colegio_tipo: 'ninguno' });
+  await admin('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'estudiante', nombre: 'Admin', email: 'admin@x.co', password: 'clave12345', colegio_tipo: 'ninguno' });
   const lista = (await admin('GET', '/api/admin/verificaciones')).datos.mentores;
   assert.equal(lista.length, 1);
   assert.equal(lista[0].documento, '80111222');
@@ -510,7 +510,7 @@ test('documentos de verificación en almacenamiento privado (Supabase Storage)',
   await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
   await m('POST', '/api/verificacion/enviar');
   const admin = app.cliente();
-  await admin('POST', '/api/registro', { rol: 'estudiante', nombre: 'Admin', email: 'admin@x.co', password: 'clave12345', colegio_tipo: 'ninguno' });
+  await admin('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'estudiante', nombre: 'Admin', email: 'admin@x.co', password: 'clave12345', colegio_tipo: 'ninguno' });
   const lista = (await admin('GET', '/api/admin/verificaciones')).datos.mentores[0];
   const doc = await admin('GET', `/api/admin/documentos/${lista.documentos[0].id}`);
   assert.equal(doc.estado, 200);
@@ -555,12 +555,12 @@ test('KYC: verificación automática cuando todo coincide, revisión manual si n
   const app = await iniciar({ kycSimulado: true }); t.after(app.cerrar);
   const nuevoMentor = async (nombre, sufijo) => {
     const m = app.cliente();
-    await m('POST', '/api/registro', { rol: 'profesor', nombre, email: `kyc${sufijo}@x.co`, password: 'clave12345' });
+    await m('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre, email: `kyc${sufijo}@x.co`, password: 'clave12345' });
     await m('PUT', '/api/perfil', { nombre, ciudad: 'Bogotá D.C.', documento: `5212345${sufijo}`, materias: 'Matemáticas' });
     return m;
   };
   const admin = app.cliente();
-  await admin('POST', '/api/registro', { rol: 'estudiante', nombre: 'Admin', email: 'admin@x.co', password: 'clave12345', colegio_tipo: 'ninguno' });
+  await admin('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'estudiante', nombre: 'Admin', email: 'admin@x.co', password: 'clave12345', colegio_tipo: 'ninguno' });
   app.db.prepare(`UPDATE usuarios SET es_admin = 1 WHERE email = 'admin@x.co'`).run();
 
   // 1) Todo coincide → se verifica solo
@@ -609,7 +609,7 @@ test('KYC: verificación automática cuando todo coincide, revisión manual si n
 
   // 4) Validaciones al iniciar
   const sinDoc = app.cliente();
-  await sinDoc('POST', '/api/registro', { rol: 'profesor', nombre: 'Juan Pérez', email: 'juan@x.co', password: 'clave12345' });
+  await sinDoc('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre: 'Juan Pérez', email: 'juan@x.co', password: 'clave12345' });
   assert.equal((await sinDoc('POST', '/api/kyc/iniciar')).estado, 201, 'ya no hace falta escribir la cédula antes: sale del documento');
   await sinDoc('PUT', '/api/perfil', { nombre: 'Juan', documento: '123456' });
   const unNombre = await sinDoc('POST', '/api/kyc/iniciar');
@@ -622,7 +622,7 @@ test('KYC: verificación automática cuando todo coincide, revisión manual si n
 test('KYC: aprobación manual si se desactiva la automática, y sin simulación en producción', async (t) => {
   const app = await iniciar({ kycSimulado: true, kycAutoAprobar: false }); t.after(app.cerrar);
   const m = app.cliente();
-  await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
+  await m('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
   await m('PUT', '/api/perfil', { nombre: 'Laura Gómez', documento: '52123456' });
   await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
   await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
@@ -632,7 +632,7 @@ test('KYC: aprobación manual si se desactiva la automática, y sin simulación 
 
   const sin = await iniciar(); t.after(sin.cerrar);   // sin KYC configurado: flujo manual de documentos
   const x = sin.cliente();
-  await x('POST', '/api/registro', { rol: 'profesor', nombre: 'Ana Ruiz', email: 'a@x.co', password: 'clave12345' });
+  await x('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre: 'Ana Ruiz', email: 'a@x.co', password: 'clave12345' });
   assert.equal((await x('POST', '/api/kyc/iniciar')).estado, 503);
   assert.equal((await x('POST', '/api/kyc/simular', { desenlace: 'aprobado' })).estado, 404);
   assert.equal((await x('GET', '/api/verificacion')).datos.kyc.modo, 'ninguno');
@@ -696,7 +696,7 @@ test('Didit: crear sesión, webhook firmado → verificación automática, y cas
   const app = await iniciar({ didit: { apiKey: 'sk_test_x', workflowId: 'wf-1', webhookSecret: SECRETO }, baseUrl: 'https://artia.test' }, { fetchFn });
   t.after(app.cerrar);
   const m = app.cliente();
-  await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
+  await m('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
   await m('PUT', '/api/perfil', { nombre: 'Laura Gómez', ciudad: 'Bogotá D.C.', documento: '52123456' });
   await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
   await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
@@ -714,6 +714,8 @@ test('Didit: crear sesión, webhook firmado → verificación automática, y cas
   assert.equal(cuerpo.callback, 'https://artia.test/api/kyc/retorno');
   assert.equal(cuerpo.language, 'es');
   assert.equal(cuerpo.expected_details.id_country, 'COL');
+  assert.match(cuerpo.biometric_consent.given_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/, 'se informa a Didit la autorización ya recogida');
+  assert.ok(cuerpo.biometric_consent.text_version);
   assert.equal(cuerpo.expected_details.identification_number, '52123456');
 
   const retorno = await fetch(app.base + '/api/kyc/retorno?verificationSessionId=sess-1&status=Approved', { redirect: 'manual' });
@@ -733,7 +735,7 @@ test('Didit: crear sesión, webhook firmado → verificación automática, y cas
 
   // otro mentor: Didit aprueba pero el documento es de otra persona → administrador, con motivos
   const p = app.cliente();
-  await p('POST', '/api/registro', { rol: 'profesor', nombre: 'Pedro Salazar', email: 'p@x.co', password: 'clave12345' });
+  await p('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre: 'Pedro Salazar', email: 'p@x.co', password: 'clave12345' });
   await p('PUT', '/api/perfil', { nombre: 'Pedro Salazar', documento: '80111222' });
   await p('POST', '/api/kyc/iniciar');
   llamadas.length = 0;
@@ -746,7 +748,7 @@ test('Didit: crear sesión, webhook firmado → verificación automática, y cas
 
   // sin prueba de vida o sin rostro en el flujo → nunca se verifica solo
   const q2 = app.cliente();
-  await q2('POST', '/api/registro', { rol: 'profesor', nombre: 'Ana Ruiz', email: 'a@x.co', password: 'clave12345' });
+  await q2('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre: 'Ana Ruiz', email: 'a@x.co', password: 'clave12345' });
   await q2('PUT', '/api/perfil', { nombre: 'Ana Ruiz', documento: '52123456' });
   await q2('POST', '/api/kyc/iniciar');
   app.db.prepare(`UPDATE usuarios SET kyc_sesion = 'sess-3' WHERE email = 'a@x.co'`).run();
@@ -758,7 +760,7 @@ test('Didit: crear sesión, webhook firmado → verificación automática, y cas
 
   // Didit rechaza el documento → el mentor puede reintentar
   const r = app.cliente();
-  await r('POST', '/api/registro', { rol: 'profesor', nombre: 'Marta Ríos', email: 'm@x.co', password: 'clave12345' });
+  await r('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre: 'Marta Ríos', email: 'm@x.co', password: 'clave12345' });
   await r('PUT', '/api/perfil', { nombre: 'Marta Ríos', documento: '60123456' });
   await r('POST', '/api/kyc/iniciar');
   app.db.prepare(`UPDATE usuarios SET kyc_sesion = 'sess-4' WHERE email = 'm@x.co'`).run();
@@ -782,7 +784,7 @@ test('Didit: error del proveedor al crear la sesión no deja al mentor a medias'
   const fetchFn = async () => ({ ok: false, status: 400, text: async () => '{"workflow_id":["Invalid workflow_id."]}', json: async () => ({}) });
   const app = await iniciar({ didit: { apiKey: 'k', workflowId: 'mal', webhookSecret: SECRETO } }, { fetchFn }); t.after(app.cerrar);
   const m = app.cliente();
-  await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
+  await m('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345' });
   await m('PUT', '/api/perfil', { nombre: 'Laura Gómez', documento: '52123456' });
   const r = await m('POST', '/api/kyc/iniciar');
   assert.equal(r.estado, 502);
@@ -794,7 +796,7 @@ test('KYC: la cédula sale del documento verificado (sin escribirla antes) y no 
   const app = await iniciar({ kycSimulado: true }); t.after(app.cerrar);
   const nuevo = async (nombre, correo) => {
     const m = app.cliente();
-    await m('POST', '/api/registro', { rol: 'profesor', nombre, email: correo, password: 'clave12345' });
+    await m('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre, email: correo, password: 'clave12345' });
     await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
     await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
     return m;
@@ -820,7 +822,7 @@ test('KYC: la cédula sale del documento verificado (sin escribirla antes) y no 
   // sin proveedor (modo manual) la cédula sigue siendo obligatoria
   const sin = await iniciar(); t.after(sin.cerrar);
   const x = sin.cliente();
-  await x('POST', '/api/registro', { rol: 'profesor', nombre: 'Ana Ruiz', email: 'a@x.co', password: 'clave12345' });
+  await x('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre: 'Ana Ruiz', email: 'a@x.co', password: 'clave12345' });
   await x('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
   await x('POST', '/api/verificacion/documentos?tipo=cedula', PNG);
   await x('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
@@ -830,7 +832,7 @@ test('KYC: la cédula sale del documento verificado (sin escribirla antes) y no 
 test('la foto de la cédula y el título son obligatorios también con KYC', async (t) => {
   const app = await iniciar({ kycSimulado: true }); t.after(app.cerrar);
   const m = app.cliente();
-  await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Camila Ortiz', email: 'c@x.co', password: 'clave12345' });
+  await m('POST', '/api/registro', { acepta_terminos: true, autoriza_verificacion: true, rol: 'profesor', nombre: 'Camila Ortiz', email: 'c@x.co', password: 'clave12345' });
   await m('POST', '/api/kyc/iniciar');
   await m('POST', '/api/kyc/simular', { desenlace: 'aprobado' });
   assert.equal((await m('GET', '/api/verificacion')).datos.completo, false, 'identidad ok pero sin documentos');
@@ -844,4 +846,58 @@ test('la foto de la cédula y el título son obligatorios también con KYC', asy
   await m('POST', '/api/verificacion/documentos?tipo=titulo', PNG);
   assert.equal((await m('GET', '/api/verificacion')).datos.completo, true);
   assert.equal((await m('POST', '/api/verificacion/enviar')).datos.estado, 'verificado');
+});
+
+test('términos y condiciones: aceptación obligatoria, registrada y versionada', async (t) => {
+  const app = await iniciar(); t.after(app.cerrar);
+  const base = { nombre: 'Ana Ruiz', email: 'ana@x.co', password: 'clave12345', colegio_tipo: 'publico' };
+  const c = app.cliente();
+  let r = await c('POST', '/api/registro', { ...base, rol: 'estudiante' });
+  assert.equal(r.estado, 400, 'sin aceptar no se crea la cuenta');
+  assert.match(r.datos.error, /Términos/);
+  assert.equal((await c('POST', '/api/registro', { ...base, rol: 'estudiante', acepta_terminos: false })).estado, 400);
+  assert.equal(app.db.prepare('SELECT COUNT(*) n FROM usuarios').get().n, 0, 'no quedó ninguna cuenta a medias');
+  r = await c('POST', '/api/registro', { ...base, rol: 'estudiante', acepta_terminos: true });
+  assert.equal(r.estado, 201);
+  assert.equal(r.datos.usuario.terminos_ok, true);
+  assert.equal(r.datos.usuario.verificacion_autorizada, false, 'un estudiante no autoriza verificación de identidad');
+  const fila = app.db.prepare(`SELECT terminos_version, terminos_fecha FROM usuarios WHERE email = 'ana@x.co'`).get();
+  assert.match(fila.terminos_version, /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(fila.terminos_fecha, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, 'queda la fecha y hora de la aceptación');
+  assert.ok((await app.cliente()('GET', '/api/catalogo')).datos.terminosVersion);
+
+  // el mentor además autoriza expresamente la verificación de su identidad (datos sensibles)
+  const m = app.cliente();
+  const mb = { nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345', rol: 'profesor', acepta_terminos: true };
+  r = await m('POST', '/api/registro', mb);
+  assert.equal(r.estado, 400);
+  assert.match(r.datos.error, /identidad/);
+  r = await m('POST', '/api/registro', { ...mb, autoriza_verificacion: true });
+  assert.equal(r.estado, 201);
+  assert.equal(r.datos.usuario.verificacion_autorizada, true);
+
+  // quien aceptó una versión anterior debe aceptar la vigente
+  app.db.prepare(`UPDATE usuarios SET terminos_version = '2020-01-01' WHERE email = 'ana@x.co'`).run();
+  const a = app.cliente(); await a('POST', '/api/login', { email: 'ana@x.co', password: 'clave12345' });
+  assert.equal((await a('GET', '/api/yo')).datos.usuario.terminos_ok, false);
+  assert.equal((await a('POST', '/api/terminos/aceptar', {})).estado, 400);
+  assert.equal((await a('POST', '/api/terminos/aceptar', { acepta_terminos: true })).datos.usuario.terminos_ok, true);
+  assert.equal((await app.cliente()('POST', '/api/terminos/aceptar', { acepta_terminos: true })).estado, 401);
+});
+
+test('verificación de identidad exige la autorización específica del mentor', async (t) => {
+  const app = await iniciar({ kycSimulado: true }); t.after(app.cerrar);
+  const m = app.cliente();
+  await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Laura Gómez', email: 'l@x.co', password: 'clave12345', acepta_terminos: true, autoriza_verificacion: true });
+  // cuenta anterior sin autorización registrada
+  app.db.prepare(`UPDATE usuarios SET verificacion_autorizada = ''`).run();
+  assert.equal((await m('POST', '/api/kyc/iniciar')).estado, 403);
+  assert.equal((await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG)).estado, 403, 'tampoco se suben documentos');
+  assert.equal((await m('POST', '/api/verificacion/autorizar', {})).estado, 400, 'hay que marcarla');
+  assert.equal((await m('POST', '/api/verificacion/autorizar', { acepto: true })).estado, 200);
+  assert.ok(app.db.prepare(`SELECT verificacion_autorizada v FROM usuarios`).get().v, 'queda la fecha de la autorización');
+  assert.equal((await m('POST', '/api/kyc/iniciar')).estado, 201);
+  assert.equal((await m('POST', '/api/verificacion/documentos?tipo=cedula', PNG)).estado, 201);
+  const est = app.cliente(); await registrar(est, 'estudiante', 'Ana');
+  assert.equal((await est('POST', '/api/verificacion/autorizar', { acepto: true })).estado, 403, 'solo mentores');
 });

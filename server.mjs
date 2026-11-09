@@ -7,11 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { abrirBD } from './db.mjs';
 import {
   CIUDADES, MATERIAS, CATEGORIAS, materiasDe, NIVELES, MODALIDADES, LOCALIDADES_BOGOTA, COLEGIO_TIPOS, GRADOS, DIAS,
-  normalizarCelular, normalizarDocumento,
+  normalizarCelular, normalizarDocumento, TERMINOS_VERSION,
 } from './colombia.mjs';
 import {
   ErrorHTTP, Resp, falla, json, hashClave, verificarClave, texto, entero, listaTexto,
-  leerCookie, leerJSON, leerBinario,
+  leerCookie, leerJSON, leerBinario, sqlAhora,
 } from './helpers.mjs';
 import { registrarAgenda } from './agenda.mjs';
 import { registrarSuscripcion } from './suscripcion.mjs';
@@ -102,6 +102,8 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     nivel: u.nivel, intereses: u.intereses, colegio_tipo: u.colegio_tipo, colegio_nombre: u.colegio_nombre,
     localidad: u.localidad, grado: u.grado, es_menor: !!u.es_menor,
     acudiente_nombre: u.acudiente_nombre, acudiente_celular: u.acudiente_celular,
+    terminos_ok: u.terminos_version === TERMINOS_VERSION, terminos_version: u.terminos_version,
+    verificacion_autorizada: !!u.verificacion_autorizada,
     suscripcion: suscripcionDe(u), pasos: pasosDe(u),
   });
 
@@ -164,7 +166,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
 
   ruta('GET', '/api/catalogo', () => ({
     ciudades: CIUDADES, materias: MATERIAS, categorias: CATEGORIAS, niveles: NIVELES, localidades: LOCALIDADES_BOGOTA,
-    colegioTipos: COLEGIO_TIPOS, grados: GRADOS, dias: DIAS,
+    colegioTipos: COLEGIO_TIPOS, grados: GRADOS, dias: DIAS, terminosVersion: TERMINOS_VERSION,
   }));
 
   const materia = (v, campo = 'materia') => {
@@ -190,9 +192,13 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
       colegio = body.colegio_tipo in COLEGIO_TIPOS ? body.colegio_tipo : falla(400, 'Indica si tu colegio es público, privado o si no estás en un colegio.');
       menor = marcado(body.es_menor) ? 1 : 0;
     }
+    // Autorizaciones expresas (Ley 1581 de 2012): sin ellas no se crea la cuenta.
+    if (!marcado(body.acepta_terminos)) falla(400, 'Debes aceptar los Términos y Condiciones y la Política de Tratamiento de Datos para crear tu cuenta.');
+    if (rol === 'profesor' && !marcado(body.autoriza_verificacion)) falla(400, 'Para ser mentor debes autorizar la verificación de tu identidad (cédula, selfie y documentos).');
     if (q('SELECT 1 FROM usuarios WHERE email = ?').get(email)) falla(409, 'Ya existe una cuenta con ese correo.');
-    const { lastInsertRowid } = q('INSERT INTO usuarios (email, pass_hash, rol, nombre, colegio_tipo, es_menor, es_admin) VALUES (?,?,?,?,?,?,?)')
-      .run(email, hashClave(pass), rol, nombre, colegio, menor, config.adminEmails.includes(email) ? 1 : 0);
+    const ahora = sqlAhora();
+    const { lastInsertRowid } = q('INSERT INTO usuarios (email, pass_hash, rol, nombre, colegio_tipo, es_menor, es_admin, terminos_version, terminos_fecha, verificacion_autorizada) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(email, hashClave(pass), rol, nombre, colegio, menor, config.adminEmails.includes(email) ? 1 : 0, TERMINOS_VERSION, ahora, rol === 'profesor' ? ahora : '');
     crearSesion(res, Number(lastInsertRowid));
     return json(201, { usuario: privado(q('SELECT * FROM usuarios WHERE id = ?').get(lastInsertRowid)) });
   });
@@ -218,6 +224,14 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     if (token) q('DELETE FROM sesiones WHERE token = ?').run(token);
     res.setHeader('Set-Cookie', 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
     return { ok: true };
+  });
+
+  // Quien creó su cuenta con una versión anterior de los documentos debe aceptar la vigente.
+  ruta('POST', '/api/terminos/aceptar', ({ usuario, body }) => {
+    exigir(usuario);
+    if (!marcado(body.acepta_terminos)) falla(400, 'Debes aceptar los Términos y la Política de Tratamiento de Datos.');
+    q('UPDATE usuarios SET terminos_version = ?, terminos_fecha = ? WHERE id = ?').run(TERMINOS_VERSION, sqlAhora(), usuario.id);
+    return { usuario: privado(q('SELECT * FROM usuarios WHERE id = ?').get(usuario.id)) };
   });
 
   ruta('GET', '/api/yo', ({ usuario }) => ({ usuario: usuario ? privado(usuario) : null }));

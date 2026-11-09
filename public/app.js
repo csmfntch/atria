@@ -3,6 +3,8 @@ const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
 const $aviso = document.getElementById('aviso');
 
+import { BORRADOR, TERMINOS, PRIVACIDAD, AUTORIZACION_VERIFICACION } from '/legal.js';
+
 // ---------- utilidades ----------
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 class Raw { constructor(s) { this.s = s; } }
@@ -61,6 +63,7 @@ function perfilEstudianteIncompleto(u) {
 function avisosCuenta() {
   if (!yo) return html``;
   const items = [];
+  if (!yo.terminos_ok) items.push(html`Actualizamos los <a href="#/terminos">Términos</a> y la <a href="#/privacidad">Política de Datos</a>. <button class="btn chico" data-accion="aceptar-terminos">Aceptar</button>`);
   const s = yo.suscripcion;
   if (yo.rol === 'profesor' && yo.verificacion_estado !== 'verificado') {
     items.push(yo.verificacion_estado === 'pendiente'
@@ -254,7 +257,10 @@ function vistaAcceso(modo, params) {
             ${Object.entries(catalogo.colegioTipos).map(([k, v]) => html`<label class="opcion"><input type="radio" name="colegio_tipo" value="${k}" required> ${v}</label>`)}
           </fieldset>
           <label class="opcion"><input type="checkbox" name="es_menor"> Soy menor de 18 años (un acudiente deberá registrarse en mi perfil)</label>` : ''}
-        ${reg && esMentor ? html`<p class="suave">Después de crear tu cuenta deberás verificar tu identidad (cédula y título) para que tus clases sean públicas.</p>` : ''}
+        ${reg && esMentor ? html`
+          <p class="suave">Después de crear tu cuenta verificarás tu identidad (cédula, selfie y título) para que tus clases sean públicas.</p>
+          <label class="opcion"><input type="checkbox" name="autoriza_verificacion" required> <span>${AUTORIZACION_VERIFICACION}</span></label>` : ''}
+        ${reg ? html`<label class="opcion"><input type="checkbox" name="acepta_terminos" required> <span>Acepto los <a href="#/terminos" target="_blank" rel="noopener">Términos y Condiciones</a> y la <a href="#/privacidad" target="_blank" rel="noopener">Política de Tratamiento de Datos Personales</a>.${!esMentor ? ' Si soy menor de 18 años, mi acudiente los acepta y me autoriza a usar Artia.' : ''}</span></label>` : ''}
         <button class="btn">${reg ? 'Crear cuenta' : 'Ingresar'}</button>
         <p class="suave">${reg ? html`¿Ya tienes cuenta? <a href="#/ingresar?rol=${rol}">Ingresa</a>` : html`¿Nuevo aquí? <a href="#/registro?rol=${rol}">Crea tu cuenta</a>`}</p>
       </form>
@@ -394,6 +400,13 @@ async function vistaVerificacion(params = new URLSearchParams()) {
       ${v.estado === 'pendiente' ? html`<p>Recibimos tu información. Un administrador la revisará pronto.</p>` : ''}
       ${v.estado === 'verificado' ? html`<p>Tu identidad fue verificada. Tus clases muestran la insignia <span class="verif">✓ Verificado</span>.</p>` : ''}
     </article>
+    ${!yo.verificacion_autorizada && editable ? html`
+    <form class="tarjeta campos" data-form="autorizar">
+      <h2>Autorización</h2>
+      <div id="error"></div>
+      <label class="opcion"><input type="checkbox" name="acepto" required> <span>${AUTORIZACION_VERIFICACION}</span></label>
+      <button class="btn">Autorizar y continuar</button>
+    </form>` : ''}
     ${editable || v.estado === 'pendiente' ? html`
     ${conKyc ? '' : html`
     <form class="tarjeta campos" data-form="documento">
@@ -646,6 +659,17 @@ async function vistaEmpezar() {
     </div>`, { aviso: false });
 }
 
+// ---------- páginas legales ----------
+function vistaLegal(doc, otro) {
+  pintar(html`
+    <article class="legal">
+      ${BORRADOR ? html`<p class="banner espera" role="note"><b>Borrador.</b> Este texto debe ser revisado por un abogado y completado antes de publicar la plataforma.</p>` : ''}
+      <h1>${doc.titulo}</h1>
+      <p class="suave">Versión ${catalogo.terminosVersion} · <a href="#/${otro[0]}">${otro[1]}</a></p>
+      ${doc.secciones.map(([t, ps]) => html`<section><h2>${t}</h2>${ps.map((x) => html`<p>${x}</p>`)}</section>`)}
+    </article>`, { aviso: false });
+}
+
 // ---------- enrutador ----------
 async function enrutar() {
   const [rutaTxt, qs] = (location.hash.slice(1) || '/').split('?');
@@ -665,6 +689,8 @@ async function enrutar() {
       case 'ingresar': vistaAcceso('ingresar', params); break;
       case 'registro': vistaAcceso('registro', params); break;
       case 'empezar': await vistaEmpezar(); break;
+      case 'terminos': vistaLegal(TERMINOS, ['privacidad', 'Política de Tratamiento de Datos']); break;
+      case 'privacidad': vistaLegal(PRIVACIDAD, ['terminos', 'Términos y Condiciones']); break;
       case 'perfil': vistaPerfil(); break;
       case 'suscripcion': await vistaSuscripcion(params); break;
       case 'verificacion': await vistaVerificacion(params); break;
@@ -700,7 +726,7 @@ document.addEventListener('submit', async (ev) => {
       }
       case 'registro': case 'ingresar': {
         const reg = f.dataset.form === 'registro';
-        ({ usuario: yo } = await api('POST', reg ? '/api/registro' : '/api/login', { ...d, es_menor: 'es_menor' in d }));
+        ({ usuario: yo } = await api('POST', reg ? '/api/registro' : '/api/login', { ...d, es_menor: 'es_menor' in d, acepta_terminos: 'acepta_terminos' in d, autoriza_verificacion: 'autoriza_verificacion' in d }));
         avisar(reg ? '¡Cuenta creada! Sigue los primeros pasos.' : `¡Hola de nuevo, ${yo.nombre.split(' ')[0]}!`);
         location.hash = reg || yo.pasos.some((p) => !p.ok) ? '#/empezar' : yo.rol === 'profesor' ? '#/agenda' : '#/clases';
         break;
@@ -731,6 +757,8 @@ document.addEventListener('submit', async (ev) => {
         avisar('¡Gracias por tu reseña!'); await enrutar(); break;
       case 'solicitud':
         await api('POST', '/api/solicitudes', d); avisar('Solicitud publicada'); await enrutar(); break;
+      case 'autorizar':
+        await api('POST', '/api/verificacion/autorizar', { acepto: 'acepto' in d }); await refrescarYo(); avisar('Autorización registrada'); await enrutar(); break;
       case 'oferta':
         await api('POST', `/api/solicitudes/${f.dataset.id}/ofertas`, { ...d, clase_id: d.clase_id ? Number(d.clase_id) : null });
         avisar('Oferta enviada'); await enrutar(); break;
@@ -780,6 +808,7 @@ document.addEventListener('click', async (ev) => {
       const r = await api('POST', '/api/kyc/simular', { desenlace: b.dataset.desenlace });
       await refrescarYo(); avisar(r.estado === 'verificado' ? '¡Verificado automáticamente!' : 'Resultado procesado'); await enrutar(); return;
     }
+    if (accion === 'aceptar-terminos') { ({ usuario: yo } = await api('POST', '/api/terminos/aceptar', { acepta_terminos: true })); avisar('Gracias por aceptar'); await enrutar(); return; }
     if (accion === 'enviar-verificacion') { await api('POST', '/api/verificacion/enviar'); await refrescarYo(); avisar(yo.verificacion_estado === 'verificado' ? '¡Verificado! Tus clases ya muestran la insignia.' : 'Enviado a revisión'); await enrutar(); }
     if (accion === 'pagar') {
       b.disabled = true;

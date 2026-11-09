@@ -1,6 +1,6 @@
 // Verificación de mentores: cédula + título/certificado, revisados por un administrador.
 import { randomBytes } from 'node:crypto';
-import { falla, json, redirigir, Resp, texto } from './helpers.mjs';
+import { falla, json, redirigir, Resp, texto, sqlAhora } from './helpers.mjs';
 import { evaluarResultado, resumen, normalizarNombre, primerNumero } from './kyc.mjs';
 
 const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'application/pdf': 'pdf' };
@@ -63,8 +63,19 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
     };
   });
 
+  const exigirAutorizacion = (u) => { if (!u.verificacion_autorizada) falla(403, 'Antes debes autorizar el tratamiento de tu cédula, tu selfie y tus documentos para verificar tu identidad.'); };
+
+  // Autorización expresa, previa e informada para tratar documentos de identidad y datos biométricos (datos sensibles).
+  ruta('POST', '/api/verificacion/autorizar', ({ usuario, body }) => {
+    exigir(usuario, 'profesor');
+    if (!(body.acepto === true || body.acepto === 'true' || body.acepto === 'on')) falla(400, 'Debes marcar la autorización para continuar.');
+    q('UPDATE usuarios SET verificacion_autorizada = ? WHERE id = ?').run(usuario.verificacion_autorizada || sqlAhora(), usuario.id);
+    return { ok: true };
+  });
+
   ruta('POST', '/api/verificacion/documentos', async ({ usuario, query, body }) => {
     exigir(usuario, 'profesor');
+    exigirAutorizacion(usuario);
     if (!['sin_enviar', 'rechazado'].includes(usuario.verificacion_estado))
       falla(409, usuario.verificacion_estado === 'pendiente' ? 'Tu verificación está en revisión.' : 'Tu cuenta ya está verificada.');
     const tipo = TIPOS_DOC.includes(query.tipo) ? query.tipo : falla(400, 'Tipo de documento no válido.');
@@ -91,6 +102,7 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
   ruta('POST', '/api/kyc/iniciar', async ({ usuario }) => {
     exigir(usuario, 'profesor');
     if (!kyc) falla(503, 'La verificación de identidad aún no está disponible.');
+    exigirAutorizacion(usuario);
     if (usuario.verificacion_estado === 'verificado') falla(409, 'Tu cuenta ya está verificada.');
     if (normalizarNombre(usuario.nombre).split(' ').filter(Boolean).length < 2) falla(400, 'Escribe tu nombre y apellido completos en tu perfil, como aparecen en tu cédula.');
     let sesion;

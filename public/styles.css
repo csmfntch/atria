@@ -192,3 +192,10 @@ input[type=radio],input[type=checkbox]{accent-color:var(--morado)}
 #aviso{width:max-content}
 
 .archivo-ok{color:#14532d;font-size:.9rem;margin:.2rem 0 .5rem}
+
+.legal{max-width:760px;margin:0 auto}
+.legal section{margin:1.4rem 0}
+.legal h2{font-size:1.2rem}
+.legal p{margin:.5rem 0}
+.pie a{color:var(--morado)}
+label.opcion span{font-weight:400;font-size:.92rem;line-height:1.45}

@@ -1,6 +1,7 @@
 // Verificación de mentores: cédula + título/certificado, revisados por un administrador.
 import { randomBytes } from 'node:crypto';
 import { falla, json, redirigir, Resp, texto, sqlAhora } from './helpers.mjs';
+import { ORIGENES_DOCUMENTO } from './colombia.mjs';
 import { evaluarResultado, resumen, normalizarNombre, primerNumero } from './kyc.mjs';
 
 const EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'application/pdf': 'pdf' };
@@ -57,7 +58,7 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
       ? TIPOS_DOC.every((t) => docs.some((d) => d.tipo === t)) && ['aprobado', 'revision'].includes(usuario.kyc_estado)
       : !!usuario.documento && TIPOS_DOC.every((t) => docs.some((d) => d.tipo === t));
     return {
-      estado: usuario.verificacion_estado, nota: usuario.verificacion_nota, documento: usuario.documento,
+      estado: usuario.verificacion_estado, nota: usuario.verificacion_nota, documento: usuario.documento, origen: usuario.documento_origen,
       documentos: docs, completo,
       kyc: { modo: kyc?.modo ?? 'ninguno', estado: usuario.kyc_estado, motivos: motivosDe(usuario), auto: config.kycAutoAprobar },
     };
@@ -99,8 +100,14 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
   }, { binario: MAX_DOC });
 
   // ---------- KYC: verificación de identidad con proveedor ----------
-  ruta('POST', '/api/kyc/iniciar', async ({ usuario }) => {
-    exigir(usuario, 'profesor');
+  ruta('POST', '/api/kyc/iniciar', async ({ usuario: u0, body }) => {
+    let usuario = exigir(u0, 'profesor');
+    // ¿Cédula colombiana o documento de otro país? Define qué documentos acepta la verificación.
+    if (body.origen !== undefined) {
+      if (!ORIGENES_DOCUMENTO.includes(body.origen)) falla(400, 'Elige si tu documento es colombiano o de otro país.');
+      q('UPDATE usuarios SET documento_origen = ? WHERE id = ?').run(body.origen, usuario.id);
+      usuario = { ...usuario, documento_origen: body.origen };
+    }
     if (!kyc) falla(503, 'La verificación de identidad aún no está disponible.');
     exigirAutorizacion(usuario);
     if (usuario.verificacion_estado === 'verificado') falla(409, 'Tu cuenta ya está verificada.');
@@ -140,7 +147,7 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
     const docs = documentosDe(usuario.id);
     if (!kyc && !usuario.documento) falla(400, 'Agrega el número de tu cédula en tu perfil.');
     if (kyc) {
-      if (!docs.some((d) => d.tipo === 'cedula')) falla(400, 'Sube la foto de tu cédula.');
+      if (!docs.some((d) => d.tipo === 'cedula')) falla(400, 'Sube la foto de tu documento de identidad (cédula o pasaporte).');
       if (!docs.some((d) => d.tipo === 'titulo')) falla(400, 'Sube tu título o certificado.');
       if (usuario.kyc_estado === 'rechazado') falla(400, 'No se pudo verificar tu identidad. Inicia la verificación de nuevo.');
       if (!['aprobado', 'revision'].includes(usuario.kyc_estado)) falla(400, 'Completa primero la verificación de identidad.');
@@ -155,7 +162,7 @@ export function registrarVerificacion({ q, ruta, exigir, exigirAdmin, almacen, k
   ruta('GET', '/api/admin/verificaciones', ({ usuario, query }) => {
     exigirAdmin(usuario);
     const estado = ['pendiente', 'verificado', 'rechazado'].includes(query.estado) ? query.estado : 'pendiente';
-    const mentores = q(`SELECT id, nombre, email, ciudad, telefono, materias, experiencia, documento, verificacion_estado, kyc_estado, kyc_resultado, creado
+    const mentores = q(`SELECT id, nombre, email, ciudad, telefono, materias, experiencia, documento, documento_origen, verificacion_estado, kyc_estado, kyc_resultado, creado
       FROM usuarios WHERE rol = 'profesor' AND verificacion_estado = ? ORDER BY id`).all(estado);
     return { mentores: mentores.map(({ kyc_resultado, ...m }) => ({ ...m, kyc_motivos: motivosDe({ kyc_resultado }), documentos: documentosDe(m.id) })) };
   });

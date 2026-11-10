@@ -98,7 +98,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   };
   const privado = (u) => ({
     ...publico(u), email: u.email, telefono: u.telefono, es_admin: !!u.es_admin,
-    documento: u.documento, verificacion_estado: u.verificacion_estado, verificacion_nota: u.verificacion_nota, kyc_estado: u.kyc_estado,
+    documento: u.documento, documento_origen: u.documento_origen, verificacion_estado: u.verificacion_estado, verificacion_nota: u.verificacion_nota, kyc_estado: u.kyc_estado,
     nivel: u.nivel, intereses: u.intereses, colegio_tipo: u.colegio_tipo, colegio_nombre: u.colegio_nombre,
     localidad: u.localidad, grado: u.grado, es_menor: !!u.es_menor,
     acudiente_nombre: u.acudiente_nombre, acudiente_celular: u.acudiente_celular,

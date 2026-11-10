@@ -901,3 +901,30 @@ test('verificación de identidad exige la autorización específica del mentor',
   const est = app.cliente(); await registrar(est, 'estudiante', 'Ana');
   assert.equal((await est('POST', '/api/verificacion/autorizar', { acepto: true })).estado, 403, 'solo mentores');
 });
+
+test('mentores extranjeros: pasaporte u otro documento, sin restringir el país', async (t) => {
+  const llamadas = [];
+  const fetchFn = async (url, init) => { llamadas.push(JSON.parse(init.body)); return { ok: true, status: 201, json: async () => ({ session_id: `s${llamadas.length}`, url: 'https://verify.didit.me/x' }), text: async () => '' }; };
+  const app = await iniciar({ didit: { apiKey: 'k', workflowId: 'wf', webhookSecret: SECRETO } }, { fetchFn }); t.after(app.cerrar);
+  const m = app.cliente();
+  await m('POST', '/api/registro', { rol: 'profesor', nombre: 'Hans Müller', email: 'h@x.co', password: 'clave12345', acepta_terminos: true, autoriza_verificacion: true });
+  assert.equal((await m('GET', '/api/yo')).datos.usuario.documento_origen, 'colombiano', 'por defecto, cédula colombiana');
+  assert.equal((await m('POST', '/api/kyc/iniciar', { origen: 'marciano' })).estado, 400);
+
+  await m('POST', '/api/kyc/iniciar');
+  assert.equal(llamadas[0].expected_details.id_country, 'COL');
+  assert.deepEqual(llamadas[0].expected_details.expected_document_types, ['ID']);
+
+  assert.equal((await m('POST', '/api/kyc/iniciar', { origen: 'extranjero' })).estado, 201);
+  assert.equal(llamadas[1].expected_details.id_country, undefined, 'sin restringir el país del documento');
+  assert.deepEqual(llamadas[1].expected_details.expected_document_types, ['P', 'RP', 'ID']);
+  assert.equal((await m('GET', '/api/verificacion')).datos.origen, 'extranjero');
+
+  // el número del pasaporte tiene letras y se compara en mayúsculas y sin separadores
+  const sesion = app.db.prepare(`SELECT kyc_sesion s FROM usuarios WHERE email = 'h@x.co'`).get().s;
+  await enviarWebhook(app, eventoDidit({ session_id: sesion }, {
+    id_verifications: [{ status: 'Approved', document_type: 'Passport', document_number: 'c01x-00t8r', first_name: 'Hans', last_name: 'Müller', full_name: 'MÜLLER HANS', issuing_state: 'DEU' }] }));
+  const k = (await m('GET', '/api/verificacion')).datos.kyc;
+  assert.equal(k.estado, 'aprobado', k.motivos.join(' | '));
+  assert.equal((await m('GET', '/api/yo')).datos.usuario.documento, 'C01X00T8R');
+});

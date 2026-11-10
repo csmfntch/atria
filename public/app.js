@@ -53,7 +53,7 @@ const opcionesMaterias = (actual = '', vacio) =>
   html`${vacio ? html`<option value="">${vacio}</option>` : ''}${catalogo.categorias.map((c) =>
     html`<optgroup label="${c.nombre}">${c.materias.map((m) => html`<option ${sel(m === actual)}>${m}</option>`)}</optgroup>`)}`;
 const optMod = (actual) => html`${Object.entries(MOD).map(([k, v]) => html`<option value="${k}" ${sel(k === actual)}>${v}</option>`)}`;
-const datosForm = (f) => Object.fromEntries(new FormData(f));
+const datosForm = (f) => { const o = {}; for (const [k, v] of new FormData(f)) o[k] = k in o ? `${o[k]}, ${v}` : v; return o; };
 const fallo = (e) => html`<p class="error" role="alert">${e.message}</p>`;
 
 // ---------- avisos de cuenta (suscripción, verificación, perfil) ----------
@@ -141,7 +141,7 @@ async function vistaClases(params) {
   const delCategoria = f.categoria ? catalogo.categorias.find((c) => c.nombre === f.categoria)?.materias ?? [] : null;
   const nFiltros = ['materia', 'ciudad', 'modalidad', 'max', 'calificacion_min', 'q'].filter((k) => f[k]).length;
   pintar(html`
-    <h1>Marketplace de clases</h1>
+    <h1>Clases</h1>
     <div class="chips" role="group" aria-label="Categorías">
       <a class="chip ${f.categoria ? '' : 'activa'}" href="${url({ categoria: '', materia: '' })}">Todas</a>
       ${catalogo.categorias.map((c) => html`<a class="chip ${f.categoria === c.nombre ? 'activa' : ''}" href="${url({ categoria: c.nombre, materia: '' })}"><span aria-hidden="true">${ICONOS[c.nombre] ?? ''}</span> ${c.nombre}</a>`)}
@@ -270,6 +270,7 @@ function vistaAcceso(modo, params) {
 // ---------- perfil ----------
 function vistaPerfil() {
   const esProf = yo.rol === 'profesor';
+  const propias = new Set(yo.materias ? yo.materias.split(', ') : []);
   pintar(html`
     ${tabsCuenta('perfil')}
     <h1>Mi perfil de ${esProf ? 'mentor' : 'estudiante'} ${esProf ? insignia(yo) : ''}</h1>
@@ -285,8 +286,10 @@ function vistaPerfil() {
       </div>
       <label>${esProf ? 'Sobre mí' : 'Cuéntanos de ti'}<textarea name="bio" maxlength="600">${yo.bio}</textarea></label>
       ${esProf ? html`
-        <label>Materias que enseñas (separadas por coma)<input name="materias" list="lista-materias" value="${yo.materias}" placeholder="Matemáticas, Inglés"></label>
-        <datalist id="lista-materias">${catalogo.materias.map((m) => html`<option value="${m}">`)}</datalist>
+        <fieldset class="materias"><legend>Materias que enseñas <span class="suave">(marca todas las que ofreces)</span></legend>
+          ${catalogo.categorias.map((c) => html`<div class="grupo-materias"><b>${ICONOS[c.nombre] ?? ''} ${c.nombre}</b>
+            <div class="opciones-fila">${c.materias.map((m) => html`<label class="opcion"><input type="checkbox" name="materias" value="${m}" ${chk(propias.has(m))}> ${m}</label>`)}</div></div>`)}
+        </fieldset>
         <div class="fila">
           <label>Valor por hora (COP)<input name="tarifa" type="number" min="0" step="1000" value="${yo.tarifa}"></label>
           <label>Modalidad<select name="modalidad">${optMod(yo.modalidad)}</select></label>
@@ -388,7 +391,7 @@ async function vistaVerificacion(params = new URLSearchParams()) {
     if (!nombreOk) faltan.push('escribir tu nombre y apellido completos en tu perfil');
     if (!['aprobado', 'revision'].includes(v.kyc.estado)) faltan.push('verificar tu identidad (paso 1)');
   } else if (!v.documento) faltan.push('guardar el número de tu cédula (botón «Guardar cédula»)');
-  if (!doc('cedula')) faltan.push('subir la foto de tu cédula');
+  if (!doc('cedula')) faltan.push('subir la foto de tu documento de identidad');
   if (!doc('titulo')) faltan.push('subir tu título o certificado');
   pintar(html`
     ${tabsCuenta('verificacion')}
@@ -420,11 +423,15 @@ async function vistaVerificacion(params = new URLSearchParams()) {
     ${conKyc ? html`
     <section class="tarjeta campos">
       <h2>1. Verifica tu identidad</h2>
-      <p>Estado: <span class="etiqueta ${k[0]}">${k[1]}</span>${v.documento ? html` · Cédula verificada: <b>${v.documento}</b>` : ''}</p>
+      <p>Estado: <span class="etiqueta ${k[0]}">${k[1]}</span>${v.documento ? html` · Documento verificado: <b>${v.documento}</b>` : ''}</p>
       ${nombreOk ? html`<p class="suave">Tu nombre en <a href="#/perfil">tu perfil</a> es <b>${yo.nombre}</b>. Debe ser igual al de tu cédula; si no, el caso pasará a revisión manual.</p>`
         : html`<p class="banner espera">Antes de empezar, escribe tu <b>nombre y apellido completos</b>, tal como aparecen en tu cédula, en <a href="#/perfil">tu perfil</a>.</p>`}
-      <p class="suave">No tienes que escribir tu número de cédula: lo leemos del documento. Tomarás una foto de tu cédula y una selfie. Comprobamos que el documento sea real, que coincida con tu cédula y tu nombre, y que la selfie sea tuya.${v.kyc.auto ? ' Si todo coincide, tu cuenta se verifica automáticamente.' : ''}</p>
+      <p class="suave">No tienes que escribir tu número de documento: lo leemos del documento. Tomarás una foto de tu cédula o pasaporte y una selfie. Comprobamos que el documento sea real, que coincida con tu nombre, y que la selfie sea tuya.${v.kyc.auto ? ' Si todo coincide, tu cuenta se verifica automáticamente.' : ''}</p>
       ${v.kyc.estado === 'revision' && v.kyc.motivos.length ? html`<div class="banner espera"><b>Un administrador revisará tu caso:</b>${v.kyc.motivos.map((m) => html`<p>${m}</p>`)}</div>` : ''}
+      ${editable ? html`<fieldset class="opciones"><legend>¿Con qué documento te vas a verificar?</legend>
+        <label class="opcion"><input type="radio" name="origen" value="colombiano" ${chk(v.origen !== 'extranjero')}> Cédula de ciudadanía de Colombia</label>
+        <label class="opcion"><input type="radio" name="origen" value="extranjero" ${chk(v.origen === 'extranjero')}> Documento de otro país: pasaporte, cédula de extranjería u otro documento de identidad vigente</label>
+      </fieldset>` : ''}
       ${editable ? html`<button class="btn ${v.kyc.estado === 'aprobado' ? 'sec' : ''}" data-accion="kyc-iniciar" ${nombreOk ? '' : new Raw('disabled')}>${v.kyc.estado ? 'Repetir verificación' : 'Verificar mi identidad'}</button>` : ''}
       ${v.kyc.modo === 'simulado' && v.kyc.estado === 'pendiente' ? html`
         <div class="banner"><b>Modo de pruebas</b> (sin documentos reales). Simula el resultado del proveedor:
@@ -437,7 +444,7 @@ async function vistaVerificacion(params = new URLSearchParams()) {
     <section class="tarjeta campos">
       <h2>2. Documentos <span class="etiqueta mal">Obligatorios</span></h2>
       <p class="suave">Para publicar tus clases necesitamos <b>los dos documentos</b>. Un administrador los puede revisar.</p>
-      ${paso('cedula', 'Foto de tu cédula (por ambos lados) *', 'JPG, PNG o PDF, máximo 4 MB. Debe verse completa y legible.')}
+      ${paso('cedula', 'Foto de tu documento de identidad *', 'Cédula (por ambos lados) o pasaporte. JPG, PNG o PDF, máximo 4 MB. Debe verse completa y legible.')}
       ${paso('titulo', 'Título, diploma o certificado *', 'Del estudio o experiencia que respalda lo que enseñas (JPG, PNG o PDF, máximo 4 MB).')}
       ${editable ? html`<button class="btn" data-accion="enviar-verificacion" ${v.completo ? '' : new Raw('disabled')}>${conKyc ? 'Terminar verificación' : 'Enviar a revisión'}</button>
         ${v.completo ? '' : html`<p class="banner espera" role="status">Para continuar falta: ${faltan.join(', ')}.</p>`}
@@ -626,7 +633,7 @@ async function vistaAdmin(estado = 'pendiente') {
     ${mentores.length ? mentores.map((m) => html`
       <article class="tarjeta">
         <h3>${m.nombre}</h3>
-        <p class="suave">${m.email} · ${m.ciudad || 'sin ciudad'} · Cédula: <b>${m.documento || '—'}</b> · Celular: ${m.telefono ? celular(m.telefono) : '—'}</p>
+        <p class="suave">${m.email} · ${m.ciudad || 'sin ciudad'} · Documento: <b>${m.documento || '—'}</b>${m.documento_origen === 'extranjero' ? ' (extranjero)' : ''} · Celular: ${m.telefono ? celular(m.telefono) : '—'}</p>
         <p><b>Materias:</b> ${m.materias || '—'}<br><b>Experiencia:</b> ${m.experiencia || '—'}</p>
         <p><b>Identidad (KYC):</b> <span class="etiqueta ${(KYC_TXT[m.kyc_estado] ?? KYC_TXT[''])[0]}">${(KYC_TXT[m.kyc_estado] ?? ['', 'Sin KYC (revisión manual de documentos)'])[1]}</span></p>
         ${m.kyc_motivos.length ? html`<div class="banner espera">${m.kyc_motivos.map((x) => html`<p>${x}</p>`)}</div>` : ''}
@@ -800,7 +807,8 @@ document.addEventListener('click', async (ev) => {
     if (accion === 'quitar-bloque') { leerBloques(); bloques.splice(Number(i), 1); pintarHorarios(); }
     if (accion === 'kyc-iniciar') {
       b.disabled = true;
-      const r = await api('POST', '/api/kyc/iniciar');
+      const origen = document.querySelector('input[name=origen]:checked')?.value;
+      const r = await api('POST', '/api/kyc/iniciar', origen ? { origen } : undefined);
       if (r.url) { location.href = r.url; return; }
       await enrutar(); return;
     }

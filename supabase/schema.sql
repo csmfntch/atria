@@ -26,6 +26,7 @@ create table if not exists usuarios (
   terminos_version text not null default '',
   terminos_fecha   text not null default '',
   verificacion_autorizada text not null default '',
+  documento_origen text not null default 'colombiano' check (documento_origen in ('colombiano','extranjero')),
   kyc_estado    text not null default '' check (kyc_estado in ('','pendiente','aprobado','revision','rechazado')),
   kyc_sesion    text not null default '',
   kyc_resultado text not null default '',   -- resumen JSON de la decisión (sin imágenes)

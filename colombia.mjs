@@ -45,10 +45,11 @@ export const GRADOS = [
 
 export const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
-// Cédula de ciudadanía / extranjería: 5 a 12 dígitos.
+// Número de documento de identidad: cédula (solo dígitos) o de otro país (pasaporte, extranjería…: letras y números).
+// Se guarda en mayúsculas y sin puntos, espacios ni guiones. Entre 5 y 20 caracteres.
 export const normalizarDocumento = (v) => {
-  const d = String(v ?? '').replace(/[.\s-]/g, '');
-  return /^\d{5,12}$/.test(d) ? d : null;
+  const d = String(v ?? '').replace(/[.\s-]/g, '').toUpperCase();
+  return /^[A-Z0-9]{5,20}$/.test(d) ? d : null;
 };
 
 // Celular colombiano: 10 dígitos que empiezan por 3 (acepta prefijo +57 / 57).
@@ -59,4 +60,6 @@ export function normalizarCelular(valor) {
 }
 
 // Versión vigente de los Términos y la Política de privacidad. Súbela cuando cambien los textos: se pedirá aceptarlos de nuevo.
+export const ORIGENES_DOCUMENTO = ['colombiano', 'extranjero'];
+
 export const TERMINOS_VERSION = '2026-11-09';

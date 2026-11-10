@@ -37,6 +37,7 @@ export function abrirBD(ruta) {
       terminos_version TEXT NOT NULL DEFAULT '',        -- versión de Términos y Privacidad aceptada
       terminos_fecha   TEXT NOT NULL DEFAULT '',        -- cuándo (UTC)
       verificacion_autorizada TEXT NOT NULL DEFAULT '', -- cuándo el mentor autorizó verificar su identidad (UTC)
+      documento_origen TEXT NOT NULL DEFAULT 'colombiano', -- colombiano | extranjero (define qué documentos acepta la verificación)
       kyc_estado    TEXT NOT NULL DEFAULT '',   -- '', pendiente, aprobado, revision, rechazado
       kyc_sesion    TEXT NOT NULL DEFAULT '',   -- id de la sesión en el proveedor
       kyc_resultado TEXT NOT NULL DEFAULT '',   -- resumen JSON de la decisión (sin imágenes)
@@ -182,6 +183,7 @@ export function abrirBD(ruta) {
     ['es_menor', 'INTEGER NOT NULL DEFAULT 0'], ['acudiente_nombre', `TEXT NOT NULL DEFAULT ''`],
     ['acudiente_celular', `TEXT NOT NULL DEFAULT ''`],
     ['terminos_version', `TEXT NOT NULL DEFAULT ''`], ['terminos_fecha', `TEXT NOT NULL DEFAULT ''`], ['verificacion_autorizada', `TEXT NOT NULL DEFAULT ''`],
+    ['documento_origen', `TEXT NOT NULL DEFAULT 'colombiano'`],
     ['kyc_estado', `TEXT NOT NULL DEFAULT ''`], ['kyc_sesion', `TEXT NOT NULL DEFAULT ''`], ['kyc_resultado', `TEXT NOT NULL DEFAULT ''`],
   ]) agregarColumna(db, 'usuarios', col, def);
   agregarColumna(db, 'documentos', 'ruta', `TEXT NOT NULL DEFAULT ''`);

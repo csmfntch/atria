@@ -199,3 +199,7 @@ input[type=radio],input[type=checkbox]{accent-color:var(--morado)}
 .legal p{margin:.5rem 0}
 .pie a{color:var(--morado)}
 label.opcion span{font-weight:400;font-size:.92rem;line-height:1.45}
+
+fieldset.materias{display:grid;gap:.8rem}
+.grupo-materias b{display:block;margin-bottom:.3rem}
+.opciones-fila{display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}

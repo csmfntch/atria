@@ -25,6 +25,7 @@ export const TERMINOS = {
        'Las personas menores de 18 años solo pueden usar Artia con la autorización de su madre, padre o representante legal (acudiente), cuyos datos de contacto son obligatorios. Los mentores deben ser mayores de edad.']],
     ['4. Mentores y verificación de identidad',
       ['Para publicar clases, el mentor debe verificar su identidad con su cédula de ciudadanía, una selfie y un título, diploma o certificado que respalde lo que enseña. Estos datos se tratan como se explica en la Política de Tratamiento de Datos.',
+       'Los mentores extranjeros pueden verificarse con su pasaporte, cédula de extranjería u otro documento de identidad vigente, y son responsables de contar con la autorización migratoria o de trabajo que la ley colombiana exija para dar clases.',
        'La insignia «Verificado» indica que la identidad del mentor fue comprobada y que se revisaron sus documentos. No garantiza la calidad de sus clases ni reemplaza tu propio criterio.',
        'Artia puede rechazar, suspender o retirar a un mentor que entregue información falsa o incumpla estos Términos.']],
     ['5. Suscripciones y pagos',

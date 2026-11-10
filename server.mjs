@@ -16,6 +16,7 @@ import {
 import { registrarAgenda } from './agenda.mjs';
 import { registrarSuscripcion } from './suscripcion.mjs';
 import { registrarVerificacion } from './verificacion.mjs';
+import { registrarAdmin } from './admin.mjs';
 import { crearAlmacen } from './almacen.mjs';
 import { proveedorSimulado } from './kyc.mjs';
 import { proveedorDidit } from './didit.mjs';
@@ -43,8 +44,14 @@ export function configDesdeEnv(env = process.env) {
     pagosSimulados: env.PAGOS_SIMULADOS === '1' && !produccion,
     // Detrás de un proxy (Render, Railway, Fly…) la IP real viene en X-Forwarded-For.
     confiarProxy: env.TRUST_PROXY === '1',
+    // Datos de la empresa para los textos legales y contacto de soporte (se muestran en Términos, Privacidad y recuperación de clave).
+    empresa: { nombre: env.EMPRESA_RAZON_SOCIAL ?? '', nit: env.EMPRESA_NIT ?? '', direccion: env.EMPRESA_DIRECCION ?? '', correo: env.EMPRESA_CORREO ?? '', ciudad: env.EMPRESA_CIUDAD ?? '' },
+    soporte: env.SOPORTE_CONTACTO ?? '',
+    legalRevisado: env.LEGAL_REVISADO === '1',
+    limiteRegistros: Number(env.LIMITE_REGISTROS_HORA ?? 20),
     // KYC: simulado solo en desarrollo; en producción lo da el proveedor (Didit) cuando esté integrado.
-    didit: env.DIDIT_API_KEY && env.DIDIT_WORKFLOW_ID && env.DIDIT_WEBHOOK_SECRET
+    // KYC_PROVEEDOR=manual apaga Didit (verificación manual de documentos por un administrador) sin borrar las llaves.
+    didit: env.KYC_PROVEEDOR !== 'manual' && env.DIDIT_API_KEY && env.DIDIT_WORKFLOW_ID && env.DIDIT_WEBHOOK_SECRET
       ? { apiKey: env.DIDIT_API_KEY, workflowId: env.DIDIT_WORKFLOW_ID, webhookSecret: env.DIDIT_WEBHOOK_SECRET } : null,
     kycSimulado: env.KYC_SIMULADO === '1' && !produccion,
     kycAutoAprobar: env.KYC_AUTO_APROBAR !== '0',
@@ -102,7 +109,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     nivel: u.nivel, intereses: u.intereses, colegio_tipo: u.colegio_tipo, colegio_nombre: u.colegio_nombre,
     localidad: u.localidad, grado: u.grado, es_menor: !!u.es_menor,
     acudiente_nombre: u.acudiente_nombre, acudiente_celular: u.acudiente_celular,
-    terminos_ok: u.terminos_version === TERMINOS_VERSION, terminos_version: u.terminos_version,
+    clave_temporal: !!u.clave_temporal, terminos_ok: u.terminos_version === TERMINOS_VERSION, terminos_version: u.terminos_version,
     verificacion_autorizada: !!u.verificacion_autorizada,
     suscripcion: suscripcionDe(u), pasos: pasosDe(u),
   });
@@ -113,7 +120,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
       (SELECT ROUND(AVG(calificacion), 1) FROM resenas r WHERE r.profesor_id = c.profesor_id) AS promedio,
       (SELECT COUNT(*) FROM resenas r WHERE r.profesor_id = c.profesor_id) AS num_resenas
     FROM clases c JOIN usuarios u ON u.id = c.profesor_id`;
-  const VISIBLE = `c.activa = 1 AND u.verificacion_estado = 'verificado' AND ${SUSCRITO('u.id')}`;
+  const VISIBLE = `c.activa = 1 AND u.suspendido = 0 AND u.verificacion_estado = 'verificado' AND ${SUSCRITO('u.id')}`;
 
   // ----- sesión -----
   function crearSesion(res, usuarioId) {
@@ -128,7 +135,8 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     const s = q('SELECT usuario_id, expira FROM sesiones WHERE token = ?').get(token);
     if (!s) return null;
     if (s.expira < Date.now()) { q('DELETE FROM sesiones WHERE token = ?').run(token); return null; }
-    return q('SELECT * FROM usuarios WHERE id = ?').get(s.usuario_id) ?? null;
+    const u = q('SELECT * FROM usuarios WHERE id = ?').get(s.usuario_id) ?? null;
+    return u && !u.suspendido ? u : null;
   }
   const exigir = (u, rol) => {
     if (!u) falla(401, 'Debes iniciar sesión.');
@@ -167,6 +175,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   ruta('GET', '/api/catalogo', () => ({
     ciudades: CIUDADES, materias: MATERIAS, categorias: CATEGORIAS, niveles: NIVELES, localidades: LOCALIDADES_BOGOTA,
     colegioTipos: COLEGIO_TIPOS, grados: GRADOS, dias: DIAS, terminosVersion: TERMINOS_VERSION,
+    empresa: config.empresa, soporte: config.soporte, legalRevisado: config.legalRevisado,
   }));
 
   const materia = (v, campo = 'materia') => {
@@ -181,7 +190,10 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   const clave = (v) => { const c = String(v ?? ''); if (c.length < 8) falla(400, 'La contraseña debe tener al menos 8 caracteres.'); return c; };
   const marcado = (v) => v === true || v === 'true' || v === '1' || v === 'on' || v === 1;
 
-  ruta('POST', '/api/registro', ({ body, res }) => {
+  const registros = new Map(); // ip -> { n, desde }
+  ruta('POST', '/api/registro', ({ body, res, ip }) => {
+    const rg = registros.get(ip);
+    if (rg && Date.now() - rg.desde < 3_600_000 && rg.n >= config.limiteRegistros) falla(429, 'Demasiadas cuentas creadas desde esta conexión. Inténtalo más tarde.');
     const rol = body.rol === 'profesor' || body.rol === 'estudiante' ? body.rol : falla(400, 'Elige si eres mentor o estudiante.');
     const email = texto(body.email, 120, { requerido: true, campo: 'correo' }).toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) falla(400, 'El correo no es válido.');
@@ -199,6 +211,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     const ahora = sqlAhora();
     const { lastInsertRowid } = q('INSERT INTO usuarios (email, pass_hash, rol, nombre, colegio_tipo, es_menor, es_admin, terminos_version, terminos_fecha, verificacion_autorizada) VALUES (?,?,?,?,?,?,?,?,?,?)')
       .run(email, hashClave(pass), rol, nombre, colegio, menor, config.adminEmails.includes(email) ? 1 : 0, TERMINOS_VERSION, ahora, rol === 'profesor' ? ahora : '');
+    registros.set(ip, rg && Date.now() - rg.desde < 3_600_000 ? { ...rg, n: rg.n + 1 } : { n: 1, desde: Date.now() });
     crearSesion(res, Number(lastInsertRowid));
     return json(201, { usuario: privado(q('SELECT * FROM usuarios WHERE id = ?').get(lastInsertRowid)) });
   });
@@ -213,6 +226,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
       falla(401, 'Correo o contraseña incorrectos.');
     }
     intentos.delete(ip);
+    if (u.suspendido) falla(403, `Tu cuenta está suspendida o fue eliminada.${config.soporte ? ' Escríbenos a ' + config.soporte + '.' : ''}`);
     if (body.rol && body.rol !== u.rol && !u.es_admin)
       falla(403, u.rol === 'profesor' ? 'Esta cuenta es de mentor. Ingresa por «Soy mentor».' : 'Esta cuenta es de estudiante. Ingresa por «Soy estudiante».');
     crearSesion(res, u.id);
@@ -222,6 +236,45 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   ruta('POST', '/api/logout', ({ req, res }) => {
     const token = leerCookie(req, 'sid');
     if (token) q('DELETE FROM sesiones WHERE token = ?').run(token);
+    res.setHeader('Set-Cookie', 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
+    return { ok: true };
+  });
+
+  ruta('POST', '/api/clave', ({ req, usuario, body }) => {
+    exigir(usuario);
+    if (!verificarClave(String(body.actual ?? ''), usuario.pass_hash)) falla(400, 'La contraseña actual no es correcta.');
+    const nueva = clave(body.nueva);
+    q('UPDATE usuarios SET pass_hash = ?, clave_temporal = 0 WHERE id = ?').run(hashClave(nueva), usuario.id);
+    q('DELETE FROM sesiones WHERE usuario_id = ? AND token != ?').run(usuario.id, leerCookie(req, 'sid') ?? '');
+    return { ok: true };
+  });
+
+  /**
+   * Eliminar mi cuenta (derecho de supresión). Se borran los datos personales, los documentos y las sesiones; se desactivan
+   * las clases y se cancelan las reservas futuras. Los registros de pagos y suscripciones se conservan, sin datos personales,
+   * por obligaciones contables.
+   */
+  ruta('POST', '/api/cuenta/eliminar', async ({ res, usuario, body }) => {
+    exigir(usuario);
+    if (usuario.es_admin) falla(403, 'Una cuenta de administrador no se puede eliminar desde aquí.');
+    if (!verificarClave(String(body.password ?? ''), usuario.pass_hash)) falla(400, 'La contraseña no es correcta.');
+    const hoy = new Date().toISOString().slice(0, 10);
+    for (const d of q('SELECT ruta FROM documentos WHERE usuario_id = ? AND ruta != ?').all(usuario.id, '')) {
+      if (almacen) await almacen.borrar(d.ruta).catch((e) => console.error(e.message));
+    }
+    db.exec('BEGIN');
+    try {
+      q('DELETE FROM documentos WHERE usuario_id = ?').run(usuario.id);
+      q('DELETE FROM sesiones WHERE usuario_id = ?').run(usuario.id);
+      q('DELETE FROM horarios WHERE profesor_id = ?').run(usuario.id);
+      q('DELETE FROM solicitudes WHERE estudiante_id = ?').run(usuario.id);
+      q('UPDATE clases SET activa = 0 WHERE profesor_id = ?').run(usuario.id);
+      q(`UPDATE reservas SET estado = 'cancelada' WHERE (profesor_id = ? OR estudiante_id = ?) AND estado IN ('pendiente','aceptada') AND fecha >= ?`).run(usuario.id, usuario.id, hoy);
+      q(`UPDATE usuarios SET email = ?, nombre = 'Cuenta eliminada', pass_hash = '!', ciudad = '', telefono = '', bio = '', materias = '', tarifa = 0,
+         experiencia = '', documento = '', nivel = '', intereses = '', colegio_nombre = '', localidad = '', grado = '', acudiente_nombre = '',
+         acudiente_celular = '', kyc_sesion = '', kyc_resultado = '', verificacion_nota = '', suspendido = 1 WHERE id = ?`).run(`eliminado-${usuario.id}@artia.invalid`, usuario.id);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
     res.setHeader('Set-Cookie', 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
     return { ok: true };
   });
@@ -274,7 +327,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   // ----- mentores (públicos solo si están verificados) -----
   ruta('GET', '/api/profesores/(\\d+)', ({ params, usuario }) => {
     const p = q(`SELECT * FROM usuarios WHERE id = ? AND rol = 'profesor'`).get(params[0]) ?? falla(404, 'Mentor no encontrado.');
-    if (p.verificacion_estado !== 'verificado' && usuario?.id !== p.id && !usuario?.es_admin) falla(404, 'Mentor no encontrado.');
+    if ((p.verificacion_estado !== 'verificado' || p.suspendido) && usuario?.id !== p.id && !usuario?.es_admin) falla(404, 'Mentor no encontrado.');
     const clases = q(`${SELECT_CLASE} WHERE c.profesor_id = ? AND c.activa = 1 ORDER BY c.id DESC`).all(p.id);
     const resenas = q(`SELECT r.calificacion, r.comentario, r.creado, e.nombre AS autor FROM resenas r
       JOIN usuarios e ON e.id = r.estudiante_id WHERE r.profesor_id = ? ORDER BY r.id DESC LIMIT 50`).all(p.id)
@@ -414,6 +467,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   registrarAgenda(ctx);
   registrarSuscripcion(ctx);
   registrarVerificacion(ctx);
+  registrarAdmin(ctx);
 
   // ---------- despachador ----------
   return async function manejar(req, res) {

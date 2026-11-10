@@ -34,6 +34,8 @@ export function abrirBD(ruta) {
       verificacion_estado TEXT NOT NULL DEFAULT 'sin_enviar'
                  CHECK (verificacion_estado IN ('sin_enviar','pendiente','verificado','rechazado')),
       verificacion_nota   TEXT NOT NULL DEFAULT '',
+      suspendido    INTEGER NOT NULL DEFAULT 0,   -- 1 = cuenta suspendida por un administrador (o eliminada)
+      clave_temporal INTEGER NOT NULL DEFAULT 0,  -- 1 = el administrador le dio una clave temporal: debe cambiarla
       terminos_version TEXT NOT NULL DEFAULT '',        -- versión de Términos y Privacidad aceptada
       terminos_fecha   TEXT NOT NULL DEFAULT '',        -- cuándo (UTC)
       verificacion_autorizada TEXT NOT NULL DEFAULT '', -- cuándo el mentor autorizó verificar su identidad (UTC)
@@ -182,6 +184,7 @@ export function abrirBD(ruta) {
     ['localidad', `TEXT NOT NULL DEFAULT ''`], ['grado', `TEXT NOT NULL DEFAULT ''`],
     ['es_menor', 'INTEGER NOT NULL DEFAULT 0'], ['acudiente_nombre', `TEXT NOT NULL DEFAULT ''`],
     ['acudiente_celular', `TEXT NOT NULL DEFAULT ''`],
+    ['suspendido', 'INTEGER NOT NULL DEFAULT 0'], ['clave_temporal', 'INTEGER NOT NULL DEFAULT 0'],
     ['terminos_version', `TEXT NOT NULL DEFAULT ''`], ['terminos_fecha', `TEXT NOT NULL DEFAULT ''`], ['verificacion_autorizada', `TEXT NOT NULL DEFAULT ''`],
     ['documento_origen', `TEXT NOT NULL DEFAULT 'colombiano'`],
     ['kyc_estado', `TEXT NOT NULL DEFAULT ''`], ['kyc_sesion', `TEXT NOT NULL DEFAULT ''`], ['kyc_resultado', `TEXT NOT NULL DEFAULT ''`],

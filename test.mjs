@@ -928,3 +928,129 @@ test('mentores extranjeros: pasaporte u otro documento, sin restringir el país'
   assert.equal(k.estado, 'aprobado', k.motivos.join(' | '));
   assert.equal((await m('GET', '/api/yo')).datos.usuario.documento, 'C01X00T8R');
 });
+
+// ---------- salida a producción: administración, recuperación de clave, eliminación de cuenta ----------
+async function conAdmin(app) {
+  const admin = app.cliente();
+  await admin('POST', '/api/registro', { rol: 'estudiante', nombre: 'Admin Artia', email: 'admin@x.co', password: 'claveadmin1', colegio_tipo: 'ninguno', acepta_terminos: true });
+  app.db.prepare(`UPDATE usuarios SET es_admin = 1 WHERE email = 'admin@x.co'`).run();
+  return admin;
+}
+
+test('administración: buscar, suspender y reactivar usuarios', async (t) => {
+  const app = await iniciar(); t.after(app.cerrar);
+  const admin = await conAdmin(app);
+  const { m, id, clase } = await mentorListo(app, 'Laura');
+  const e = await estudianteListo(app);
+
+  assert.equal((await e('GET', '/api/admin/usuarios')).estado, 403, 'solo administradores');
+  const lista = (await admin('GET', '/api/admin/usuarios?q=laura')).datos.usuarios;
+  assert.equal(lista.length, 1);
+  assert.equal((await admin('GET', '/api/admin/usuarios?q=%25')).datos.usuarios.length, 0, 'el comodín se escapa');
+  assert.ok(!JSON.stringify(lista).includes('pass_hash'), 'no expone contraseñas');
+
+  assert.equal((await e('GET', '/api/clases')).datos.clases.length, 1);
+  assert.equal((await admin('PUT', `/api/admin/usuarios/${id}/suspender`, { suspendido: true })).datos.suspendido, true);
+  assert.equal((await m('GET', '/api/yo')).datos.usuario, null, 'su sesión deja de valer');
+  assert.equal((await e('GET', '/api/clases')).datos.clases.length, 0, 'sus clases se ocultan');
+  assert.equal((await e('GET', `/api/profesores/${id}`)).estado, 404);
+  assert.equal((await e('GET', `/api/clases/${clase.id}`)).estado, 404);
+  const login = await app.cliente()('POST', '/api/login', { email: 'laura@x.co', password: 'clave12345' });
+  assert.equal(login.estado, 403);
+  assert.match(login.datos.error, /suspendida/);
+
+  await admin('PUT', `/api/admin/usuarios/${id}/suspender`, { suspendido: false });
+  assert.equal((await app.cliente()('POST', '/api/login', { email: 'laura@x.co', password: 'clave12345' })).estado, 200);
+  assert.equal((await e('GET', '/api/clases')).datos.clases.length, 1, 'vuelve a aparecer');
+  const adminId = app.db.prepare(`SELECT id FROM usuarios WHERE email = 'admin@x.co'`).get().id;
+  assert.equal((await admin('PUT', `/api/admin/usuarios/${adminId}/suspender`, { suspendido: true })).estado, 403, 'no se suspende a un administrador');
+});
+
+test('recuperación de contraseña asistida por el administrador y cambio de clave', async (t) => {
+  const app = await iniciar(); t.after(app.cerrar);
+  const admin = await conAdmin(app);
+  const u = app.cliente(); await registrar(u, 'estudiante', 'Ana');
+  const id = (await u('GET', '/api/yo')).datos.usuario.id;
+
+  assert.equal((await u('POST', `/api/admin/usuarios/${id}/clave-temporal`)).estado, 403);
+  const r = await admin('POST', `/api/admin/usuarios/${id}/clave-temporal`);
+  assert.equal(r.estado, 200);
+  assert.match(r.datos.clave, /^[A-Za-z2-9]{12}$/);
+  assert.equal((await u('GET', '/api/yo')).datos.usuario, null, 'se cierran sus sesiones');
+  assert.equal((await app.cliente()('POST', '/api/login', { email: 'ana@x.co', password: 'clave12345' })).estado, 401, 'la clave anterior ya no sirve');
+
+  const c = app.cliente();
+  const login = await c('POST', '/api/login', { email: 'ana@x.co', password: r.datos.clave });
+  assert.equal(login.estado, 200);
+  assert.equal(login.datos.usuario.clave_temporal, true, 'se le pide cambiarla');
+  assert.equal((await c('POST', '/api/clave', { actual: 'incorrecta', nueva: 'nuevaclave99' })).estado, 400);
+  assert.equal((await c('POST', '/api/clave', { actual: r.datos.clave, nueva: 'corta' })).estado, 400);
+  assert.equal((await c('POST', '/api/clave', { actual: r.datos.clave, nueva: 'nuevaclave99' })).estado, 200);
+  assert.equal((await c('GET', '/api/yo')).datos.usuario.clave_temporal, false);
+  assert.equal((await app.cliente()('POST', '/api/login', { email: 'ana@x.co', password: 'nuevaclave99' })).estado, 200);
+  const adminId = app.db.prepare(`SELECT id FROM usuarios WHERE email = 'admin@x.co'`).get().id;
+  assert.equal((await admin('POST', `/api/admin/usuarios/${adminId}/clave-temporal`)).estado, 403, 'no a otro administrador');
+});
+
+test('eliminar mi cuenta: datos personales fuera, pagos conservados, clases y reservas desactivadas', async (t) => {
+  const borrados = [];
+  const almacen = { async guardar() {}, async leer() { return PNG; }, async borrar(ruta) { borrados.push(ruta); } };
+  const app = await iniciar({}, { almacen }); t.after(app.cerrar);
+  const { m, id, clase } = await mentorListo(app, 'Laura');
+  const e = await estudianteListo(app);
+  const manana = sumarDias(hoyCol(), 1);
+  const reserva = (await e('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' })).datos.reserva.id;
+  await e('POST', '/api/solicitudes', { materia: 'Física', modalidad: 'virtual' });
+
+  assert.equal((await m('POST', '/api/cuenta/eliminar', { password: 'incorrecta' })).estado, 400);
+  assert.equal((await app.cliente()('POST', '/api/cuenta/eliminar', { password: 'x' })).estado, 401);
+  assert.equal((await m('POST', '/api/cuenta/eliminar', { password: 'clave12345' })).estado, 200);
+
+  const fila = app.db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id);
+  assert.equal(fila.nombre, 'Cuenta eliminada');
+  assert.match(fila.email, /^eliminado-\d+@artia\.invalid$/);
+  for (const campo of ['telefono', 'bio', 'materias', 'experiencia', 'documento', 'ciudad']) assert.equal(fila[campo], '', campo);
+  assert.equal(app.db.prepare('SELECT COUNT(*) n FROM documentos WHERE usuario_id = ?').get(id).n, 0, 'documentos borrados');
+  assert.equal(app.db.prepare('SELECT COUNT(*) n FROM horarios WHERE profesor_id = ?').get(id).n, 0);
+  assert.ok(app.db.prepare('SELECT COUNT(*) n FROM pagos WHERE usuario_id = ?').get(id).n >= 1, 'los pagos se conservan');
+  assert.equal(app.db.prepare('SELECT estado FROM reservas WHERE id = ?').get(reserva).estado, 'cancelada', 'las reservas futuras se cancelan');
+  assert.equal((await e('GET', '/api/clases')).datos.clases.length, 0);
+  assert.equal((await m('GET', '/api/yo')).datos.usuario, null);
+  assert.equal((await app.cliente()('POST', '/api/login', { email: 'laura@x.co', password: 'clave12345' })).estado, 401, 'el correo queda libre');
+
+  // estudiante: se borran sus solicitudes
+  assert.equal((await e('POST', '/api/cuenta/eliminar', { password: 'clave12345' })).estado, 200);
+  assert.equal(app.db.prepare('SELECT COUNT(*) n FROM solicitudes').get().n, 0);
+  // administrador: no desde aquí
+  const admin = await conAdmin(app);
+  assert.equal((await admin('POST', '/api/cuenta/eliminar', { password: 'claveadmin1' })).estado, 403);
+});
+
+test('moderación de reseñas, límite de cuentas por conexión y datos de la empresa', async (t) => {
+  const app = await iniciar({ limiteRegistros: 3, empresa: { nombre: 'Artia SAS', nit: '900.123.456-7', direccion: 'Bogotá', correo: 'legal@artia.co', ciudad: 'Bogotá' }, soporte: 'soporte@artia.co', legalRevisado: true }); t.after(app.cerrar);
+  const admin = await conAdmin(app);   // 1.ª cuenta
+  const { id, clase } = await mentorListo(app, 'Laura');   // 2.ª
+  const e = await estudianteListo(app);                    // 3.ª
+  const sid = (await e('GET', '/api/yo')).datos.usuario.id;
+  const rid = Number(app.db.prepare(`INSERT INTO reservas (clase_id, profesor_id, estudiante_id, fecha, hora, duracion_min, estado) VALUES (?,?,?,?,?,60,'aceptada')`).run(clase.id, id, sid, sumarDias(hoyCol(), -2), '09:00').lastInsertRowid);
+  await e('POST', '/api/resenas', { reserva_id: rid, calificacion: 1, comentario: 'Mal comportamiento' });
+  assert.equal((await e('GET', '/api/admin/resenas')).estado, 403);
+  const resenas = (await admin('GET', '/api/admin/resenas')).datos.resenas;
+  assert.equal(resenas.length, 1);
+  assert.equal((await admin('DELETE', `/api/admin/resenas/${resenas[0].id}`)).estado, 200);
+  assert.equal((await admin('DELETE', `/api/admin/resenas/${resenas[0].id}`)).estado, 404);
+  assert.equal((await app.cliente()('GET', `/api/profesores/${id}`)).datos.profesor.num_resenas, 0);
+
+  const cuarta = await registrar(app.cliente(), 'estudiante', 'Otra');
+  assert.equal(cuarta.estado, 429, 'demasiadas cuentas desde la misma conexión');
+
+  const cat = (await app.cliente()('GET', '/api/catalogo')).datos;
+  assert.equal(cat.empresa.nit, '900.123.456-7');
+  assert.equal(cat.soporte, 'soporte@artia.co');
+  assert.equal(cat.legalRevisado, true);
+  const { configDesdeEnv } = await import('./server.mjs');
+  const base = { DIDIT_API_KEY: 'k', DIDIT_WORKFLOW_ID: 'w', DIDIT_WEBHOOK_SECRET: 's' };
+  assert.ok(configDesdeEnv(base).didit, 'con las tres variables, Didit activo');
+  assert.equal(configDesdeEnv({ ...base, KYC_PROVEEDOR: 'manual' }).didit, null, 'KYC_PROVEEDOR=manual lo apaga sin borrar las llaves');
+  assert.equal(configDesdeEnv({}).legalRevisado, false);
+});

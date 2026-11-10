@@ -23,6 +23,8 @@ create table if not exists usuarios (
   documento   text not null default '',
   verificacion_estado text not null default 'sin_enviar' check (verificacion_estado in ('sin_enviar','pendiente','verificado','rechazado')),
   verificacion_nota   text not null default '',
+  suspendido    boolean not null default false,
+  clave_temporal boolean not null default false,
   terminos_version text not null default '',
   terminos_fecha   text not null default '',
   verificacion_autorizada text not null default '',

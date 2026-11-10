@@ -2,18 +2,19 @@
 //
 // ⚠ Estos textos son una base de trabajo. Deben ser revisados y ajustados por un abogado colombiano antes de
 // publicar la plataforma. Completa los datos entre [CORCHETES] (razón social, NIT, dirección, correo, ciudad…).
-// Cuando los textos estén aprobados, cambia BORRADOR a false (quita el aviso) y sube TERMINOS_VERSION en
-// colombia.mjs si cambias el contenido: a todos los usuarios se les pedirá aceptar de nuevo.
-export const BORRADOR = true;
+// Datos de la empresa: variables EMPRESA_* en el servidor. Cuando un abogado apruebe los textos, define LEGAL_REVISADO=1
+// (quita el aviso de borrador) y busca los dos marcadores [AJUSTAR…] de abajo (reembolsos y plazo de conservación).
+// Si cambias el contenido, sube TERMINOS_VERSION en colombia.mjs: se pedirá aceptar de nuevo.
+/** Datos de la empresa (los define el servidor con variables de entorno); si faltan, queda el marcador entre corchetes. */
+export const datosEmpresa = (e = {}) => ({
+  nombre: e.nombre || '[RAZÓN SOCIAL DE ARTIA]',
+  nit: e.nit || '[NIT]',
+  direccion: e.direccion || '[DIRECCIÓN, CIUDAD, COLOMBIA]',
+  correo: e.correo || '[CORREO PARA SOLICITUDES DE DATOS Y SOPORTE]',
+  ciudad: e.ciudad || '[CIUDAD]',
+});
 
-export const EMPRESA = {
-  nombre: '[RAZÓN SOCIAL DE ARTIA]',
-  nit: '[NIT]',
-  direccion: '[DIRECCIÓN, CIUDAD, COLOMBIA]',
-  correo: '[CORREO PARA SOLICITUDES DE DATOS Y SOPORTE]',
-};
-
-export const TERMINOS = {
+export const terminos = (EMPRESA) => ({
   titulo: 'Términos y Condiciones de Uso',
   secciones: [
     ['1. Quiénes somos y qué hacemos',
@@ -48,11 +49,11 @@ export const TERMINOS = {
     ['11. Cambios y terminación',
       ['Podemos actualizar estos Términos; si el cambio es relevante te pediremos aceptarlos de nuevo. Puedes cerrar tu cuenta cuando quieras escribiendo a ' + EMPRESA.correo + '.']],
     ['12. Ley aplicable',
-      ['Estos Términos se rigen por las leyes de la República de Colombia. Cualquier controversia se someterá a los jueces competentes de [CIUDAD], Colombia, sin perjuicio de los derechos del consumidor ante la Superintendencia de Industria y Comercio.']],
+      ['Estos Términos se rigen por las leyes de la República de Colombia. Cualquier controversia se someterá a los jueces competentes de ' + EMPRESA.ciudad + ', Colombia, sin perjuicio de los derechos del consumidor ante la Superintendencia de Industria y Comercio.']],
   ],
-};
+});
 
-export const PRIVACIDAD = {
+export const privacidad = (EMPRESA) => ({
   titulo: 'Política de Tratamiento de Datos Personales',
   secciones: [
     ['1. Responsable del tratamiento',
@@ -79,7 +80,7 @@ export const PRIVACIDAD = {
     ['8. Vigencia',
       ['Esta política rige desde su publicación. Si cambia de forma sustancial te lo informaremos y pediremos tu autorización cuando la ley lo exija.']],
   ],
-};
+});
 
 export const AUTORIZACION_VERIFICACION =
   'Autorizo de forma expresa, previa e informada a Artia y a su proveedor Didit para tratar mi cédula, la foto de mi documento, mi selfie (dato biométrico, sensible) y mi título o certificado, con el único fin de verificar mi identidad y mis credenciales como mentor y prevenir fraudes. Sé que no estoy obligado a autorizarlo, aunque sin hacerlo no podré ser mentor, y que puedo revocar esta autorización escribiendo al correo indicado en la Política de Tratamiento de Datos.';

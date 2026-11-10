@@ -54,6 +54,11 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 | `KYC_AUTO_APROBAR` (1) | `0` para que el administrador apruebe siempre, aunque el KYC coincida |
 | `DIDIT_API_KEY`, `DIDIT_WORKFLOW_ID`, `DIDIT_WEBHOOK_SECRET` | Activan el KYC con Didit (ver «Conectar Didit») |
 | `KYC_SIMULADO=1` | Solo desarrollo: simula los resultados del proveedor de KYC (nunca en producción) |
+| `EMPRESA_RAZON_SOCIAL`, `EMPRESA_NIT`, `EMPRESA_DIRECCION`, `EMPRESA_CORREO`, `EMPRESA_CIUDAD` | Datos de la empresa en los Términos y la Política de privacidad |
+| `SOPORTE_CONTACTO` | Correo o WhatsApp de soporte (pie de página y «¿Olvidaste tu contraseña?») |
+| `LEGAL_REVISADO=1` | Quita el aviso de «borrador» de los textos legales (solo cuando un abogado los apruebe) |
+| `KYC_PROVEEDOR=manual` | Apaga Didit y usa la revisión manual de documentos, sin borrar las llaves |
+| `LIMITE_REGISTROS_HORA` (20) | Cuentas que se pueden crear por hora desde una misma conexión |
 | `ADMIN_EMAILS` | Correos (separados por coma) que son administradores al registrarse |
 
 ### Configurar Wompi
@@ -89,6 +94,10 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 8. Wompi: en su panel pon la URL de eventos `BASE_URL/api/wompi/eventos`.
 
 También sirve cualquier host con servidor Node y volumen persistente (Fly.io, un VPS…). **No uses hosting estático** (Netlify, Vercel…): Artia necesita un servidor Node.
+
+## Administración y soporte
+
+En **Administración** (cuentas de `ADMIN_EMAILS`): *Verificaciones* de mentores, *Usuarios* (buscar, **suspender/reactivar**, **clave temporal** para quien olvidó su contraseña: se muestra una sola vez y el usuario debe cambiarla al entrar) y *Reseñas* (eliminar las inapropiadas). Cada usuario puede **cambiar su contraseña** y **eliminar su cuenta** desde «Mi cuenta» (se borran datos personales, documentos y solicitudes, se desactivan sus clases y se cancelan sus reservas futuras; los pagos se conservan sin datos personales).
 
 ## Términos, privacidad y autorizaciones
 

@@ -203,3 +203,6 @@ label.opcion span{font-weight:400;font-size:.92rem;line-height:1.45}
 fieldset.materias{display:grid;gap:.8rem}
 .grupo-materias b{display:block;margin-bottom:.3rem}
 .opciones-fila{display:flex;flex-wrap:wrap;gap:.4rem 1.4rem}
+
+.zona-peligro{border-color:#efb2bc}
+.zona-peligro h2{color:var(--error)}

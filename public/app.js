@@ -3,7 +3,7 @@ const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
 const $aviso = document.getElementById('aviso');
 
-import { BORRADOR, TERMINOS, PRIVACIDAD, AUTORIZACION_VERIFICACION } from '/legal.js';
+import { terminos, privacidad, datosEmpresa, AUTORIZACION_VERIFICACION } from '/legal.js';
 
 // ---------- utilidades ----------
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -28,7 +28,7 @@ const estrellas = (p) => (p == null ? '' : html`<span class="estrellas" role="im
 const insignia = (c) => (c.verificado ? html`<span class="verif" title="Identidad y título revisados por Artia">✓ Verificado</span>` : '');
 
 let yo = null;
-let catalogo = { ciudades: [], materias: [], categorias: [], niveles: [], localidades: [], colegioTipos: {}, grados: [], dias: [] };
+let catalogo = { ciudades: [], materias: [], categorias: [], niveles: [], localidades: [], colegioTipos: {}, grados: [], dias: [], empresa: {}, soporte: '', legalRevisado: false };
 const ICONOS = { 'Idiomas': '🗣️', 'Ciencias y números': '🧮', 'Humanidades': '📖', 'Bienestar y espiritualidad': '🧘', 'Arte y creatividad': '🎨', 'Deportes': '🎾', 'Tecnología': '🤖' };
 
 async function api(metodo, ruta, cuerpo) {
@@ -63,6 +63,7 @@ function perfilEstudianteIncompleto(u) {
 function avisosCuenta() {
   if (!yo) return html``;
   const items = [];
+  if (yo.clave_temporal) items.push(html`Entraste con una clave temporal. <a href="#/perfil">Cámbiala ahora</a> en «Seguridad de la cuenta».`);
   if (!yo.terminos_ok) items.push(html`Actualizamos los <a href="#/terminos">Términos</a> y la <a href="#/privacidad">Política de Datos</a>. <button class="btn chico" data-accion="aceptar-terminos">Aceptar</button>`);
   const s = yo.suscripcion;
   if (yo.rol === 'profesor' && yo.verificacion_estado !== 'verificado') {
@@ -262,6 +263,7 @@ function vistaAcceso(modo, params) {
           <label class="opcion"><input type="checkbox" name="autoriza_verificacion" required> <span>${AUTORIZACION_VERIFICACION}</span></label>` : ''}
         ${reg ? html`<label class="opcion"><input type="checkbox" name="acepta_terminos" required> <span>Acepto los <a href="#/terminos" target="_blank" rel="noopener">Términos y Condiciones</a> y la <a href="#/privacidad" target="_blank" rel="noopener">Política de Tratamiento de Datos Personales</a>.${!esMentor ? ' Si soy menor de 18 años, mi acudiente los acepta y me autoriza a usar Artia.' : ''}</span></label>` : ''}
         <button class="btn">${reg ? 'Crear cuenta' : 'Ingresar'}</button>
+        ${reg ? '' : html`<p class="suave"><a href="#/ayuda-clave">¿Olvidaste tu contraseña?</a></p>`}
         <p class="suave">${reg ? html`¿Ya tienes cuenta? <a href="#/ingresar?rol=${rol}">Ingresa</a>` : html`¿Nuevo aquí? <a href="#/registro?rol=${rol}">Crea tu cuenta</a>`}</p>
       </form>
     </div>`, { aviso: false });
@@ -317,7 +319,28 @@ function vistaPerfil() {
         <p class="suave">Los mentores solo ven tu grado y si tu colegio es público o privado, nunca el nombre del colegio. Si eres menor, comparten el contacto de tu acudiente, no el tuyo.</p>`}
       <p class="suave">Tu celular solo se comparte con la otra persona cuando una reserva es aceptada.</p>
       <button class="btn">Guardar perfil</button>
-    </form>`, { aviso: true });
+    </form>
+    <section class="tarjeta campos" id="seguridad">
+      <h2>Seguridad de la cuenta</h2>
+      <form class="campos" data-form="clave">
+        <div id="error"></div>
+        <div class="fila">
+          <label>Contraseña actual<input type="password" name="actual" required autocomplete="current-password"></label>
+          <label>Nueva contraseña (mínimo 8 caracteres)<input type="password" name="nueva" required minlength="8" autocomplete="new-password"></label>
+        </div>
+        <button class="btn sec chico">Cambiar contraseña</button>
+      </form>
+    </section>
+    ${yo.es_admin ? '' : html`
+    <section class="tarjeta campos zona-peligro">
+      <h2>Eliminar mi cuenta</h2>
+      <p class="suave">Borramos tus datos personales, tus documentos y tus solicitudes; desactivamos tus clases y cancelamos tus reservas futuras. Los registros de pagos se conservan, sin datos personales, por obligaciones contables. Esta acción no se puede deshacer.</p>
+      <form class="campos" data-form="eliminar-cuenta">
+        <div id="error"></div>
+        <label>Escribe tu contraseña para confirmar<input type="password" name="password" required autocomplete="current-password"></label>
+        <button class="btn peligro chico">Eliminar mi cuenta definitivamente</button>
+      </form>
+    </section>`}`, { aviso: true });
   const f = $app.querySelector('form[data-form=perfil]');
   if (f && !esProf) sincronizarPerfil(f);
 }
@@ -623,13 +646,46 @@ async function vistaAgenda() {
 }
 
 // ---------- administración ----------
-async function vistaAdmin(estado = 'pendiente') {
+const tabsAdmin = (actual) => html`<div class="tabs"><a href="#/admin/pendiente">Verificaciones</a><a href="#/admin/usuarios" class="${actual === 'usuarios' ? 'activa' : ''}">Usuarios</a><a href="#/admin/resenas" class="${actual === 'resenas' ? 'activa' : ''}">Reseñas</a></div>`;
+
+async function vistaAdminUsuarios(params) {
+  const q = params.get('q') ?? '';
+  const { usuarios } = await api('GET', '/api/admin/usuarios' + (q ? '?q=' + encodeURIComponent(q) : ''));
+  pintar(html`
+    <h1>Administración</h1>${tabsAdmin('usuarios')}
+    <form class="filtros" data-form="admin-buscar" role="search"><input name="q" value="${q}" placeholder="Buscar por nombre o correo" aria-label="Buscar usuario"><button class="btn">Buscar</button></form>
+    ${usuarios.length ? usuarios.map((u) => html`
+      <article class="tarjeta">
+        <h3>${u.nombre} ${u.es_admin ? html`<span class="etiqueta">Administrador</span>` : ''} ${u.suspendido ? html`<span class="etiqueta mal">Suspendido</span>` : ''}</h3>
+        <p class="suave">${u.email} · ${u.rol === 'profesor' ? 'Mentor' : 'Estudiante'}${u.rol === 'profesor' ? ' · verificación: ' + u.verificacion_estado : ''} · desde ${fechaSQL(u.creado)}</p>
+        ${u.es_admin || u.email.endsWith('@artia.invalid') ? '' : html`<div class="acciones-fila">
+          <button class="btn sec chico" data-accion="clave-temporal" data-id="${u.id}" data-nombre="${u.nombre}">Clave temporal</button>
+          <button class="btn ${u.suspendido ? '' : 'peligro'} chico" data-accion="suspender" data-id="${u.id}" data-estado="${u.suspendido ? 'no' : 'si'}" data-nombre="${u.nombre}">${u.suspendido ? 'Reactivar' : 'Suspender'}</button>
+        </div>`}
+      </article>`) : html`<p class="vacio">No hay usuarios con esa búsqueda.</p>`}`, { aviso: false });
+}
+
+async function vistaAdminResenas() {
+  const { resenas } = await api('GET', '/api/admin/resenas');
+  pintar(html`
+    <h1>Administración</h1>${tabsAdmin('resenas')}
+    ${resenas.length ? resenas.map((r) => html`
+      <article class="tarjeta">
+        <p>${estrellas(r.calificacion)} <b>${r.autor}</b> sobre <b>${r.mentor}</b> <span class="suave">· ${fechaSQL(r.creado)}</span></p>
+        ${r.comentario ? html`<p>${r.comentario}</p>` : ''}
+        <button class="btn peligro chico" data-accion="borrar-resena" data-id="${r.id}">Eliminar reseña</button>
+      </article>`) : html`<p class="vacio">Aún no hay reseñas.</p>`}`, { aviso: false });
+}
+
+async function vistaAdmin(estado = 'pendiente', params = new URLSearchParams()) {
+  if (estado === 'usuarios') return vistaAdminUsuarios(params);
+  if (estado === 'resenas') return vistaAdminResenas();
   const { mentores } = await api('GET', `/api/admin/verificaciones?estado=${estado}`);
   const T = { pendiente: 'Pendientes', verificado: 'Verificados', rechazado: 'Rechazados' };
   const NOMBRE_DOC = { cedula: 'Cédula', titulo: 'Título / certificado' };
   pintar(html`
     <h1>Verificación de mentores</h1>
-    <div class="tabs">${Object.entries(T).map(([k, v]) => html`<a href="#/admin/${k}" class="${k === estado ? 'activa' : ''}">${v}</a>`)}</div>
+    <div class="tabs">${Object.entries(T).map(([k, v]) => html`<a href="#/admin/${k}" class="${k === estado ? 'activa' : ''}">${v}</a>`)}<a href="#/admin/usuarios">Usuarios</a><a href="#/admin/resenas">Reseñas</a></div>
     ${mentores.length ? mentores.map((m) => html`
       <article class="tarjeta">
         <h3>${m.nombre}</h3>
@@ -666,11 +722,25 @@ async function vistaEmpezar() {
     </div>`, { aviso: false });
 }
 
+// ---------- ayuda con la contraseña ----------
+function vistaAyudaClave() {
+  pintar(html`<div class="acceso"><article class="tarjeta">
+    <h1>¿Olvidaste tu contraseña?</h1>
+    <p>Por ahora la recuperamos con ayuda de nuestro equipo.</p>
+    <ol>
+      <li>Escríbenos ${catalogo.soporte ? html`a <b>${catalogo.soporte}</b>` : 'a nuestro canal de soporte'} <b>desde el correo con el que te registraste</b>.</li>
+      <li>Confirmaremos que eres tú y te daremos una <b>clave temporal</b>.</li>
+      <li>Entra con ella: Artia te pedirá cambiarla por una nueva.</li>
+    </ol>
+    <p><a class="btn sec" href="#/ingresar">Volver a ingresar</a></p>
+  </article></div>`, { aviso: false });
+}
+
 // ---------- páginas legales ----------
 function vistaLegal(doc, otro) {
   pintar(html`
     <article class="legal">
-      ${BORRADOR ? html`<p class="banner espera" role="note"><b>Borrador.</b> Este texto debe ser revisado por un abogado y completado antes de publicar la plataforma.</p>` : ''}
+      ${!catalogo.legalRevisado ? html`<p class="banner espera" role="note"><b>Borrador.</b> Este texto debe ser revisado por un abogado y completado antes de publicar la plataforma.</p>` : ''}
       <h1>${doc.titulo}</h1>
       <p class="suave">Versión ${catalogo.terminosVersion} · <a href="#/${otro[0]}">${otro[1]}</a></p>
       ${doc.secciones.map(([t, ps]) => html`<section><h2>${t}</h2>${ps.map((x) => html`<p>${x}</p>`)}</section>`)}
@@ -696,8 +766,9 @@ async function enrutar() {
       case 'ingresar': vistaAcceso('ingresar', params); break;
       case 'registro': vistaAcceso('registro', params); break;
       case 'empezar': await vistaEmpezar(); break;
-      case 'terminos': vistaLegal(TERMINOS, ['privacidad', 'Política de Tratamiento de Datos']); break;
-      case 'privacidad': vistaLegal(PRIVACIDAD, ['terminos', 'Términos y Condiciones']); break;
+      case 'ayuda-clave': vistaAyudaClave(); break;
+      case 'terminos': vistaLegal(terminos(datosEmpresa(catalogo.empresa)), ['privacidad', 'Política de Tratamiento de Datos']); break;
+      case 'privacidad': vistaLegal(privacidad(datosEmpresa(catalogo.empresa)), ['terminos', 'Términos y Condiciones']); break;
       case 'perfil': vistaPerfil(); break;
       case 'suscripcion': await vistaSuscripcion(params); break;
       case 'verificacion': await vistaVerificacion(params); break;
@@ -705,7 +776,7 @@ async function enrutar() {
       case 'horarios': await vistaHorarios(); break;
       case 'solicitudes': await vistaSolicitudes(); break;
       case 'agenda': case 'reservas': await vistaAgenda(); break;
-      case 'admin': await vistaAdmin(arg); break;
+      case 'admin': await vistaAdmin(arg, params); break;
       default: pintar(html`<p class="vacio">Página no encontrada. <a href="#/">Ir al inicio</a></p>`, { aviso: false });
     }
   } catch (e) { pintar(html`<p class="error" role="alert">${e.message}</p>`, { aviso: false }); }
@@ -731,6 +802,7 @@ document.addEventListener('submit', async (ev) => {
         if (location.hash === destino) await enrutar(); else location.hash = destino;
         break;
       }
+      case 'admin-buscar': { const p = new URLSearchParams(Object.entries(d).filter(([, v]) => v)); location.hash = '#/admin/usuarios' + (p.size ? '?' + p : ''); break; }
       case 'registro': case 'ingresar': {
         const reg = f.dataset.form === 'registro';
         ({ usuario: yo } = await api('POST', reg ? '/api/registro' : '/api/login', { ...d, es_menor: 'es_menor' in d, acepta_terminos: 'acepta_terminos' in d, autoriza_verificacion: 'autoriza_verificacion' in d }));
@@ -764,6 +836,11 @@ document.addEventListener('submit', async (ev) => {
         avisar('¡Gracias por tu reseña!'); await enrutar(); break;
       case 'solicitud':
         await api('POST', '/api/solicitudes', d); avisar('Solicitud publicada'); await enrutar(); break;
+      case 'clave':
+        await api('POST', '/api/clave', d); await refrescarYo(); f.reset(); avisar('Contraseña cambiada'); await enrutar(); break;
+      case 'eliminar-cuenta':
+        if (!confirm('¿Seguro que quieres eliminar tu cuenta? No se puede deshacer.')) break;
+        await api('POST', '/api/cuenta/eliminar', d); yo = null; location.hash = '#/'; pintarNav(); avisar('Tu cuenta fue eliminada'); break;
       case 'autorizar':
         await api('POST', '/api/verificacion/autorizar', { acepto: 'acepto' in d }); await refrescarYo(); avisar('Autorización registrada'); await enrutar(); break;
       case 'oferta':
@@ -825,6 +902,17 @@ document.addEventListener('click', async (ev) => {
       await api('POST', '/api/pagos/simular', { pago_id: p.pago_id });
       await refrescarYo(); avisar('Suscripción activada (modo de pruebas)'); await enrutar();
     }
+    if (accion === 'suspender') {
+      const suspender = estado === 'si';
+      if (!confirm(suspender ? `¿Suspender a ${b.dataset.nombre}? Se cerrará su sesión y sus clases dejarán de verse.` : `¿Reactivar a ${b.dataset.nombre}?`)) return;
+      await api('PUT', `/api/admin/usuarios/${id}/suspender`, { suspendido: suspender }); avisar(suspender ? 'Usuario suspendido' : 'Usuario reactivado'); await enrutar(); return;
+    }
+    if (accion === 'clave-temporal') {
+      if (!confirm(`¿Generar una clave temporal para ${b.dataset.nombre}? Se cerrará su sesión y la clave anterior dejará de servir.`)) return;
+      const r = await api('POST', `/api/admin/usuarios/${id}/clave-temporal`);
+      prompt(`Clave temporal para ${r.email}. Cópiala y envíala por un canal seguro: no se vuelve a mostrar.`, r.clave); return;
+    }
+    if (accion === 'borrar-resena' && confirm('¿Eliminar esta reseña?')) { await api('DELETE', `/api/admin/resenas/${id}`); avisar('Reseña eliminada'); await enrutar(); return; }
     if (accion === 'aprobar') { await api('PUT', `/api/admin/verificaciones/${id}`, { estado: 'verificado' }); avisar('Mentor verificado'); await enrutar(); }
     if (accion === 'rechazar') {
       const nota = prompt('Motivo del rechazo (el mentor lo verá):');
@@ -844,5 +932,7 @@ window.addEventListener('hashchange', async () => {
   try {
     [{ usuario: yo }, catalogo] = await Promise.all([api('GET', '/api/yo'), api('GET', '/api/catalogo')]);
   } catch { /* se mostrará el error en la vista */ }
+  const pie = document.getElementById('pie-soporte');
+  if (pie && catalogo.soporte) pie.textContent = `Soporte: ${catalogo.soporte}`;
   enrutar();
 })();

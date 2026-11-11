@@ -189,6 +189,10 @@ export function abrirBD(ruta) {
     ['documento_origen', `TEXT NOT NULL DEFAULT 'colombiano'`],
     ['kyc_estado', `TEXT NOT NULL DEFAULT ''`], ['kyc_sesion', `TEXT NOT NULL DEFAULT ''`], ['kyc_resultado', `TEXT NOT NULL DEFAULT ''`],
   ]) agregarColumna(db, 'usuarios', col, def);
+  const avisosNuevos = !columnas(db, 'reservas').includes('aviso_resena');
+  agregarColumna(db, 'reservas', 'aviso_resena', 'INTEGER NOT NULL DEFAULT 0');
+  agregarColumna(db, 'reservas', 'aviso_recordatorio', 'INTEGER NOT NULL DEFAULT 0');
+  if (avisosNuevos) db.exec('UPDATE reservas SET aviso_resena = 1, aviso_recordatorio = 1'); // no avisar de lo anterior
   agregarColumna(db, 'usuarios', 'cal_token', `TEXT NOT NULL DEFAULT ''`);
   agregarColumna(db, 'documentos', 'ruta', `TEXT NOT NULL DEFAULT ''`);
 

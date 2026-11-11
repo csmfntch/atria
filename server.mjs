@@ -15,6 +15,8 @@ import {
 } from './helpers.mjs';
 import { registrarAgenda } from './agenda.mjs';
 import { registrarCalendario } from './calendario.mjs';
+import { crearCorreo } from './correo.mjs';
+import { crearNotificador } from './avisos.mjs';
 import { registrarSuscripcion } from './suscripcion.mjs';
 import { registrarVerificacion } from './verificacion.mjs';
 import { registrarAdmin } from './admin.mjs';
@@ -49,6 +51,8 @@ export function configDesdeEnv(env = process.env) {
     empresa: { nombre: env.EMPRESA_RAZON_SOCIAL ?? '', nit: env.EMPRESA_NIT ?? '', direccion: env.EMPRESA_DIRECCION ?? '', correo: env.EMPRESA_CORREO ?? '', ciudad: env.EMPRESA_CIUDAD ?? '' },
     soporte: env.SOPORTE_CONTACTO ?? '',
     legalRevisado: env.LEGAL_REVISADO === '1',
+    // Correos con Resend: RESEND_API_KEY y EMAIL_REMITENTE (por ejemplo «Artia <avisos@tudominio.com>», con el dominio verificado en Resend).
+    correo: env.RESEND_API_KEY && env.EMAIL_REMITENTE ? { apiKey: env.RESEND_API_KEY, remitente: env.EMAIL_REMITENTE } : null,
     limiteRegistros: Number(env.LIMITE_REGISTROS_HORA ?? 20),
     // KYC: simulado solo en desarrollo; en producción lo da el proveedor (Didit) cuando esté integrado.
     // KYC_PROVEEDOR=manual apaga Didit (verificación manual de documentos por un administrador) sin borrar las llaves.
@@ -61,7 +65,7 @@ export function configDesdeEnv(env = process.env) {
 }
 
 // ---------- aplicación ----------
-export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, almacen = null, kyc = null } = {}) {
+export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, almacen = null, kyc = null, correo: correoExterno = null } = {}) {
   const config = { ...configDesdeEnv({}), ...configParcial };
   const q = (sql) => db.prepare(sql);
   const intentos = new Map(); // limitador simple de inicio de sesión: ip -> {n, hasta}
@@ -172,8 +176,10 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   // ---------- rutas ----------
   const rutas = [];
   const ruta = (metodo, patron, fn, opciones = {}) => rutas.push({ metodo, re: new RegExp(`^${patron}$`), fn, ...opciones });
+  const correo = correoExterno ?? crearCorreo({ ...(config.correo ?? {}), baseUrl: config.baseUrl, fetchFn });
+  const notificar = crearNotificador({ q, correo, baseUrl: config.baseUrl });
   const ctx = {
-    db, q, ruta, config, fetchFn, almacen, kyc: kyc ?? (config.didit ? proveedorDidit({ ...config.didit, baseUrl: config.baseUrl, fetchFn }) : config.kycSimulado ? proveedorSimulado() : null), SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
+    notificar, db, q, ruta, config, fetchFn, almacen, kyc: kyc ?? (config.didit ? proveedorDidit({ ...config.didit, baseUrl: config.baseUrl, fetchFn }) : config.kycSimulado ? proveedorSimulado() : null), SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
     exigir, exigirAdmin, exigirSuscripcion, exigirMentorActivo, perfilEstudianteFalta, resumenResenas,
   };
 
@@ -466,6 +472,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     const mensaje = texto(body.mensaje, 500, { requerido: true, campo: 'mensaje' });
     try { q('INSERT INTO ofertas (solicitud_id, profesor_id, clase_id, mensaje) VALUES (?,?,?,?)').run(params[0], usuario.id, claseId, mensaje); }
     catch { falla(409, 'Ya enviaste una oferta a esta solicitud.'); }
+    notificar.oferta(Number(params[0]), usuario.id);
     return json(201, { ok: true });
   });
 
@@ -482,7 +489,9 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   registrarAdmin(ctx);
 
   // ---------- despachador ----------
-  return async function manejar(req, res) {
+  manejar.avisos = notificar.procesar;
+  return manejar;
+  async function manejar(req, res) {
     try {
       const url = new URL(req.url, 'http://localhost');
       const ip = (config.confiarProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim()) || req.socket.remoteAddress || '?';
@@ -543,6 +552,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (config.seguro && !config.wompi) console.warn('⚠ WOMPI_PUBLIC_KEY / WOMPI_INTEGRITY_SECRET no configurados: no se podrán cobrar suscripciones.');
   // Documentos de verificación: Supabase Storage (bucket privado) si hay SUPABASE_URL; si no, la base local.
   const almacen = process.env.SUPABASE_URL ? crearAlmacen({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }) : null;
-  createServer(crearApp(db, config, { almacen })).listen(puerto, () =>
+  const manejador = crearApp(db, config, { almacen });
+  if (config.correo) setInterval(() => { try { manejador.avisos(); } catch (e) { console.error('Avisos:', e.message); } }, 10 * 60 * 1000).unref();
+  else console.warn('⚠ RESEND_API_KEY / EMAIL_REMITENTE no configurados: no se enviarán correos.');
+  createServer(manejador).listen(puerto, () =>
     console.log(`Artia en http://localhost:${puerto}  (BD: ${rutaBD}${config.wompi ? ', Wompi activo' : config.pagosSimulados ? ', pagos simulados' : ''}${almacen ? ', documentos en Supabase Storage' : ''})`));
 }

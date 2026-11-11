@@ -48,6 +48,7 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 | `PORT` (3100), `DB_PATH` (`data/artia.db`) | Puerto y archivo SQLite |
 | `NODE_ENV=production` | Cookies `Secure` (requiere HTTPS) y desactiva pagos simulados |
 | `BASE_URL` | URL pública (p. ej. `https://artia.co`); Wompi vuelve a `BASE_URL/api/pagos/retorno` |
+| `RESEND_API_KEY`, `EMAIL_REMITENTE` | Correos con Resend. `EMAIL_REMITENTE` debe usar un dominio verificado en Resend, p. ej. `Artia <avisos@tudominio.com>`. Sin ellas no se envía ningún correo |
 | `WOMPI_PUBLIC_KEY`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_EVENTS_SECRET` | Llaves de Wompi. Con `pub_test_…` usa el sandbox; con `pub_prod_…`, producción |
 | `PAGOS_SIMULADOS=1` | Solo desarrollo: aprueba pagos sin Wompi |
 | `PRECIO_MENTOR` (59900), `PRECIO_ESTUDIANTE` (24900) | Precio mensual en COP |

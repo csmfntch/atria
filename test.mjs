@@ -13,7 +13,8 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 /** Levanta un servidor con BD en memoria. */
 async function iniciar(config = {}, deps = {}) {
   const db = abrirBD(':memory:');
-  const servidor = createServer(crearApp(db, { pagosSimulados: true, ...config }, deps));
+  const manejador = crearApp(db, { pagosSimulados: true, ...config }, deps);
+  const servidor = createServer(manejador);
   await new Promise((r) => servidor.listen(0, r));
   const base = `http://localhost:${servidor.address().port}`;
   // cliente con cookie propia
@@ -32,7 +33,7 @@ async function iniciar(config = {}, deps = {}) {
     };
     return llamar;
   };
-  return { db, base, cliente, cerrar: () => servidor.close() };
+  return { db, base, cliente, avisos: manejador.avisos, cerrar: () => servidor.close() };
 }
 
 const registrar = (c, rol, n, extra = {}) => c('POST', '/api/registro',
@@ -1118,4 +1119,79 @@ test('calendario: .ics por reserva, enlace de suscripción privado y aviso de cl
   assert.equal((await m('GET', '/api/yo')).datos.usuario.resenas_pendientes, 0, 'solo estudiantes');
   await sofia('POST', '/api/resenas', { reserva_id: pasada, calificacion: 5 });
   assert.equal((await sofia('GET', '/api/yo')).datos.usuario.resenas_pendientes, 0, 'sin comentario también cuenta');
+});
+
+test('correos con Resend: reservas, ofertas, recordatorio y petición de reseña (sin duplicar)', async (t) => {
+  const enviados = [];
+  const app = await iniciar({}, { correo: { activo: true, enviar: async (m) => { enviados.push(m); return true; } } });
+  t.after(app.cerrar);
+  const { m, id, clase } = await mentorListo(app, 'Laura');
+  const sofia = await estudianteListo(app, 'Sofia');
+  const sid = (await sofia('GET', '/api/yo')).datos.usuario.id;
+  const para = (x) => enviados.filter((e) => e.para === x);
+
+  const manana = sumarDias(hoyCol(), 1);
+  const rid = (await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00', mensaje: '<b>Hola</b>' })).datos.reserva.id;
+  assert.equal(para('laura@x.co').length, 1, 'el mentor recibe la nueva solicitud');
+  assert.match(para('laura@x.co')[0].asunto, /Nueva solicitud/);
+  assert.match(para('laura@x.co')[0].parrafos.join(' '), /Sofia/);
+  assert.ok(!JSON.stringify(para('laura@x.co')).includes('3001'), 'sin celulares en los correos');
+
+  await m('PUT', `/api/reservas/${rid}`, { estado: 'aceptada' });
+  assert.match(para('sofia@x.co').at(-1).asunto, /Reserva confirmada/);
+  await sofia('PUT', `/api/reservas/${rid}`, { estado: 'cancelada' });
+  assert.match(para('laura@x.co').at(-1).asunto, /Clase cancelada/);
+
+  // oferta a una solicitud
+  const sol = (await sofia('POST', '/api/solicitudes', { materia: 'Matemáticas', modalidad: 'virtual', descripcion: 'x' })).datos;
+  await m('POST', `/api/solicitudes/${sol.id ?? sol.solicitud?.id}/ofertas`, { mensaje: 'Puedo ayudarte' });
+  assert.match(para('sofia@x.co').at(-1).asunto, /respondió tu solicitud/);
+
+  // recordatorio: clase aceptada que empieza dentro de 24 h (una sola vez)
+  const ahora = new Date(Date.now() - 5 * 3600 * 1000);
+  const enDosHoras = new Date(ahora.getTime() + 2 * 3600 * 1000);
+  const fecha = enDosHoras.toISOString().slice(0, 10), hora = enDosHoras.toISOString().slice(11, 16);
+  const ins = app.db.prepare(`INSERT INTO reservas (clase_id, profesor_id, estudiante_id, fecha, hora, duracion_min, estado) VALUES (?,?,?,?,?,60,'aceptada')`);
+  ins.run(clase.id, id, sid, fecha, hora);
+  const antes = enviados.length;
+  app.avisos();
+  assert.equal(enviados.length - antes, 2, 'recordatorio al estudiante y al mentor');
+  app.avisos();
+  assert.equal(enviados.length - antes, 2, 'no se repite');
+
+  // petición de reseña: clase de ayer sin calificar (una sola vez); con reseña no se pide
+  const sinResena = Number(ins.run(clase.id, id, sid, sumarDias(hoyCol(), -1), '09:00').lastInsertRowid);
+  const conResena = Number(ins.run(clase.id, id, sid, sumarDias(hoyCol(), -2), '09:00').lastInsertRowid);
+  await sofia('POST', '/api/resenas', { reserva_id: conResena, calificacion: 5 });
+  const n = enviados.length;
+  app.avisos(); app.avisos();
+  const pedidos = enviados.slice(n).filter((e) => /Cómo te fue/.test(e.asunto));
+  assert.equal(pedidos.length, 1);
+  assert.equal(pedidos[0].para, 'sofia@x.co');
+  assert.equal(app.db.prepare('SELECT aviso_resena FROM reservas WHERE id = ?').get(sinResena).aviso_resena, 1);
+});
+
+test('correos desactivados: sin clave no se envía nada y la app funciona igual', async (t) => {
+  const app = await iniciar(); t.after(app.cerrar);
+  const { clase } = await mentorListo(app);
+  const sofia = await estudianteListo(app, 'Sofia');
+  const r = await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: sumarDias(hoyCol(), 1), hora: '09:00' });
+  assert.equal(r.estado, 201);
+  app.avisos();
+});
+
+test('Resend: petición correcta, HTML escapado y errores sin romper', async () => {
+  const { crearCorreo } = await import('./correo.mjs');
+  const llamadas = [];
+  const ok = crearCorreo({ apiKey: 're_x', remitente: 'Artia <a@d.co>', baseUrl: 'https://artia.test', log: { error() {} },
+    fetchFn: async (url, o) => { llamadas.push({ url, o }); return { ok: true }; } });
+  assert.equal(await ok.enviar({ para: 'p@x.co', asunto: 'Hola', parrafos: ['<script>x</script>'], boton: { texto: 'Ir', url: 'https://artia.test/#/agenda' } }), true);
+  const cuerpo = JSON.parse(llamadas[0].o.body);
+  assert.equal(llamadas[0].url, 'https://api.resend.com/emails');
+  assert.equal(llamadas[0].o.headers.Authorization, 'Bearer re_x');
+  assert.deepEqual([cuerpo.from, cuerpo.to, cuerpo.subject], ['Artia <a@d.co>', ['p@x.co'], 'Hola']);
+  assert.ok(!cuerpo.html.includes('<script>') && cuerpo.html.includes('&lt;script&gt;'));
+  const falla = crearCorreo({ apiKey: 're_x', remitente: 'a@d.co', baseUrl: 'https://artia.test', log: { error() {} }, fetchFn: async () => ({ ok: false, status: 403, text: async () => 'no' }) });
+  assert.equal(await falla.enviar({ para: 'p@x.co', asunto: 'x', parrafos: ['x'] }), false);
+  assert.equal(await crearCorreo({}).enviar({ para: 'p@x.co', asunto: 'x', parrafos: ['x'] }), false, 'sin clave no envía');
 });

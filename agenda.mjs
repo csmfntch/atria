@@ -6,7 +6,7 @@ import {
 const ANTICIPACION_MIN = 120; // no se puede reservar con menos de 2 horas de anticipación
 const MAX_DIAS = 30;
 
-export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, exigirSuscripcion, perfilEstudianteFalta }) {
+export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, exigirSuscripcion, perfilEstudianteFalta, notificar }) {
   /** ¿Ya terminó la clase? (hora de Colombia) */
   const terminada = (fecha, hora, dur) => {
     const hoy = hoyCol();
@@ -107,6 +107,7 @@ export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, ex
       id = Number(q('INSERT INTO reservas (clase_id, profesor_id, estudiante_id, fecha, hora, duracion_min, mensaje) VALUES (?,?,?,?,?,?,?)')
         .run(clase.id, clase.profesor_id, usuario.id, fecha, hora, clase.duracion_min, texto(body.mensaje, 500)).lastInsertRowid);
     } catch { falla(409, 'Ese horario acaba de ser reservado. Elige otro.'); }
+    notificar.reservaNueva(id);
     return json(201, { reserva: { id, estado: 'pendiente', fecha, hora } });
   });
 
@@ -159,6 +160,7 @@ export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, ex
       if (pasada) falla(409, 'Esa clase ya pasó.');
     } else falla(403, 'No puedes hacer ese cambio.');
     q('UPDATE reservas SET estado = ? WHERE id = ?').run(nuevo, r.id);
+    notificar.reservaEstado(r.id, nuevo, usuario.id);
     return { ok: true };
   });
 

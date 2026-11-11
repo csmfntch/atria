@@ -187,6 +187,9 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     for (const m of lista ? lista.split(', ') : []) if (!MATERIAS.includes(m)) falla(400, `«${m}» no está en la lista de materias.`);
     return lista;
   };
+  // Intereses del estudiante: materias del catálogo y, si marca «Otra», textos propios (cortos y limitados).
+  const listaIntereses = (v) =>
+    [...new Set(String(v ?? '').split(',').map((x) => x.trim().slice(0, 40)).filter(Boolean))].slice(0, 30).join(', ');
   const clave = (v) => { const c = String(v ?? ''); if (c.length < 8) falla(400, 'La contraseña debe tener al menos 8 caracteres.'); return c; };
   const marcado = (v) => v === true || v === 'true' || v === '1' || v === 'on' || v === 1;
 
@@ -318,7 +321,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
       }
       q(`UPDATE usuarios SET nombre=?, ciudad=?, telefono=?, bio=?, nivel=?, intereses=?, colegio_tipo=?, colegio_nombre=?, localidad=?,
            grado=?, es_menor=?, acudiente_nombre=?, acudiente_celular=? WHERE id=?`)
-        .run(nombre, ciudad, tel, bio, texto(body.nivel, 60), listaTexto(body.intereses), tipo, nombreColegio,
+        .run(nombre, ciudad, tel, bio, texto(body.nivel, 60), listaIntereses(body.intereses), tipo, nombreColegio,
           tipo === 'ninguno' ? '' : localidad, grado, menor, acuNombre, acuCel, usuario.id);
     }
     return { usuario: privado(q('SELECT * FROM usuarios WHERE id = ?').get(usuario.id)) };

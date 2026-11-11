@@ -273,6 +273,9 @@ function vistaAcceso(modo, params) {
 function vistaPerfil() {
   const esProf = yo.rol === 'profesor';
   const propias = new Set(yo.materias ? yo.materias.split(', ') : []);
+  const interesesTodos = yo.intereses ? yo.intereses.split(', ') : [];
+  const interesesPropios = new Set(interesesTodos.filter((i) => catalogo.materias.includes(i)));
+  const otrosIntereses = interesesTodos.filter((i) => !catalogo.materias.includes(i)).join(', ');
   pintar(html`
     ${tabsCuenta('perfil')}
     <h1>Mi perfil de ${esProf ? 'mentor' : 'estudiante'} ${esProf ? insignia(yo) : ''}</h1>
@@ -303,7 +306,16 @@ function vistaPerfil() {
           <label>Nivel educativo<select name="nivel">${opciones(catalogo.niveles, yo.nivel, 'Selecciona')}</select></label>
           <label>Grado<select name="grado">${opciones(catalogo.grados, yo.grado, 'Selecciona')}</select></label>
         </div>
-        <label>Me interesa aprender<input name="intereses" value="${yo.intereses}" placeholder="Matemáticas, Inglés"></label>
+        <fieldset class="materias"><legend>Me interesa aprender <span class="suave">(marca todo lo que te interese)</span></legend>
+          ${catalogo.categorias.map((c) => html`<div class="grupo-materias"><b>${ICONOS[c.nombre] ?? ''} ${c.nombre}</b>
+            <div class="opciones-fila">${c.materias.map((m) => html`<label class="opcion"><input type="checkbox" name="intereses" value="${m}" ${chk(interesesPropios.has(m))}> ${m}</label>`)}</div></div>`)}
+          <div class="grupo-materias">
+            <label class="opcion"><input type="checkbox" name="intereses_otra_check" ${chk(!!otrosIntereses)}> <b>Otra</b> (escríbela)</label>
+            <div data-grupo="otra-interes" ${otrosIntereses ? '' : new Raw('hidden')}>
+              <input name="intereses_otra" maxlength="120" value="${otrosIntereses}" placeholder="Ej. Danza, Fotografía (separa con comas)" aria-label="Otras materias que te interesan">
+            </div>
+          </div>
+        </fieldset>
         <fieldset class="opciones"><legend>Tu colegio</legend>
           ${Object.entries(catalogo.colegioTipos).map(([k, v]) => html`<label class="opcion"><input type="radio" name="colegio_tipo" value="${k}" ${chk(yo.colegio_tipo === k)} required> ${v}</label>`)}
         </fieldset>
@@ -351,6 +363,8 @@ function sincronizarPerfil(f) {
   f.querySelector('[data-grupo=colegio]').hidden = !conColegio;
   f.querySelector('[data-grupo=localidad]').hidden = !bogota;
   f.colegio_nombre.required = conColegio;
+  const otra = f.querySelector('[name=intereses_otra_check]');
+  if (otra) { const g = f.querySelector('[data-grupo=otra-interes]'); g.hidden = !otra.checked; if (!otra.checked) f.intereses_otra.value = ''; }
   const menor = f.es_menor.checked;
   f.querySelector('[data-grupo=acudiente]').hidden = !menor;
   f.acudiente_nombre.required = menor;
@@ -811,7 +825,7 @@ document.addEventListener('submit', async (ev) => {
         break;
       }
       case 'perfil':
-        ({ usuario: yo } = await api('PUT', '/api/perfil', { ...d, es_menor: 'es_menor' in d }));
+        ({ usuario: yo } = await api('PUT', '/api/perfil', { ...d, es_menor: 'es_menor' in d, ...(yo.rol === 'estudiante' ? { intereses: [d.intereses, 'intereses_otra_check' in d ? d.intereses_otra : ''].filter(Boolean).join(', ') } : {}) }));
         avisar('Perfil guardado'); pintarNav(); await enrutar(); break;
       case 'documento':
         await api('PUT', '/api/perfil', { nombre: yo.nombre, ciudad: yo.ciudad, telefono: yo.telefono, bio: yo.bio, materias: yo.materias, tarifa: yo.tarifa, modalidad: yo.modalidad, experiencia: yo.experiencia, documento: d.documento });

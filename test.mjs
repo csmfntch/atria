@@ -1054,3 +1054,19 @@ test('moderación de reseñas, límite de cuentas por conexión y datos de la em
   assert.equal(configDesdeEnv({ ...base, KYC_PROVEEDOR: 'manual' }).didit, null, 'KYC_PROVEEDOR=manual lo apaga sin borrar las llaves');
   assert.equal(configDesdeEnv({}).legalRevisado, false);
 });
+
+test('intereses del estudiante: materias del catálogo y «Otra» con texto propio, acotado', async (t) => {
+  const app = await iniciar(); t.after(app.cerrar);
+  const e = app.cliente(); await registrar(e, 'estudiante', 'Sofia', { colegio_tipo: 'ninguno' });
+  const base = { nombre: 'Sofía', ciudad: 'Bogotá D.C.', colegio_tipo: 'ninguno' };
+  const todas = (await e('GET', '/api/catalogo')).datos.materias;
+  let r = await e('PUT', '/api/perfil', { ...base, intereses: [...todas, 'Danza', 'Fotografía'].join(', ') });
+  assert.equal(r.estado, 200);
+  assert.ok(r.datos.usuario.intereses.includes('Tarot') && r.datos.usuario.intereses.includes('Danza') && r.datos.usuario.intereses.endsWith('Fotografía'), 'caben todas las materias y las propias');
+  r = await e('PUT', '/api/perfil', { ...base, intereses: `Yoga, Yoga,  ${'x'.repeat(100)}, <b>Hola</b>` });
+  const lista = r.datos.usuario.intereses.split(', ');
+  assert.equal(lista.filter((x) => x === 'Yoga').length, 1, 'sin repetidos');
+  assert.ok(lista.every((x) => x.length <= 40), 'cada texto propio se limita a 40 caracteres');
+  r = await e('PUT', '/api/perfil', { ...base, intereses: Array.from({ length: 50 }, (_, i) => `Tema${i}`).join(', ') });
+  assert.equal(r.datos.usuario.intereses.split(', ').length, 30, 'máximo 30 intereses');
+});

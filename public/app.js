@@ -376,7 +376,7 @@ async function vistaSuscripcion(params) {
   const { suscripcion: s, modo, pagos } = await api('GET', '/api/suscripcion');
   if (params.get('pago') === 'ok') {
     let v = null; try { v = sessionStorage.getItem('volverClase'); sessionStorage.removeItem('volverClase'); } catch {}
-    if (v && /^\d+$/.test(v)) { await refrescarYo(); avisar('¡Pago aprobado! Ya puedes elegir tu horario.'); location.hash = `#/clase/${v}`; return; }
+    if (v && /^(\d+|solicitudes)$/.test(v)) { await refrescarYo(); avisar(v === 'solicitudes' ? '¡Pago aprobado! Ya puedes publicar tu solicitud.' : '¡Pago aprobado! Ya puedes elegir tu horario.'); location.hash = v === 'solicitudes' ? '#/solicitudes' : `#/clase/${v}`; return; }
   }
   const resultado = { ok: ['ok', '¡Pago aprobado! Tu suscripción está activa.'], pendiente: ['espera', 'Tu pago está en proceso. Se activará en cuanto el banco lo confirme.'], fallo: ['mal', 'El pago no se completó. Puedes intentarlo de nuevo.'] }[params.get('pago')];
   pintar(html`
@@ -585,7 +585,8 @@ async function vistaSolicitudes() {
   }
   pintar(html`
     <h1>Lo que estoy buscando</h1>
-    <form class="tarjeta campos" data-form="solicitud">
+    ${yo.suscripcion.activa ? '' : html`<div class="tarjeta"><p>Para publicar una solicitud activa tu suscripción mensual de <b>${cop(yo.suscripcion.precio)}</b>. Al terminar el pago volverás aquí.</p><button class="btn" data-accion="pagar" data-volver="solicitudes">Pagar suscripción</button></div>`}
+    <form class="tarjeta campos" data-form="solicitud" ${yo.suscripcion.activa ? '' : new Raw('hidden')}>
       <h2>Publicar una solicitud</h2>
       <div id="error"></div>
       <div class="fila">
@@ -923,7 +924,7 @@ document.addEventListener('click', async (ev) => {
       await api('POST', '/api/pagos/simular', { pago_id: p.pago_id });
       await refrescarYo(); avisar('Suscripción activada (modo de pruebas)');
       let v = null; try { v = sessionStorage.getItem('volverClase'); sessionStorage.removeItem('volverClase'); } catch {}
-      if (v && /^\d+$/.test(v)) location.hash = `#/clase/${v}`; else await enrutar();
+      if (v && /^(\d+|solicitudes)$/.test(v)) location.hash = v === 'solicitudes' ? '#/solicitudes' : `#/clase/${v}`; else await enrutar();
     }
     if (accion === 'suspender') {
       const suspender = estado === 'si';

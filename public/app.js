@@ -29,7 +29,7 @@ const insignia = (c) => (c.verificado ? html`<span class="verif" title="Identida
 
 let yo = null;
 let catalogo = { ciudades: [], materias: [], categorias: [], niveles: [], localidades: [], colegioTipos: {}, grados: [], dias: [], empresa: {}, soporte: '', legalRevisado: false };
-const ICONOS = { 'Idiomas': '🗣️', 'Ciencias y números': '🧮', 'Humanidades': '📖', 'Bienestar y espiritualidad': '🧘', 'Arte y creatividad': '🎨', 'Deportes': '🎾', 'Tecnología': '🤖' };
+const ICONOS = { 'Idiomas': '🗣️', 'Ciencias y números': '🧮', 'Humanidades': '📖', 'Bienestar y espiritualidad': '🧘', 'Arte y creatividad': '🎨', 'Deportes': '🎾', 'Tecnología': '🤖', 'Business': '💼', 'Psicoterapia': '🧠', 'Danza': '💃', 'Música': '🎵', 'Juegos de mesa': '🎲', 'Pastelería': '🧁', 'Cocina': '🍳', 'Enología': '🍷', 'Decoración': '🛋️' };
 
 async function api(metodo, ruta, cuerpo) {
   const r = await fetch(ruta, {

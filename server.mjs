@@ -188,7 +188,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   };
   // Intereses del estudiante: materias del catálogo y, si marca «Otra», textos propios (cortos y limitados).
   const listaIntereses = (v) =>
-    [...new Set(String(v ?? '').split(',').map((x) => x.trim().slice(0, 40)).filter(Boolean))].slice(0, 30).join(', ');
+    [...new Set(String(v ?? '').split(',').map((x) => x.trim().slice(0, 40)).filter(Boolean))].slice(0, 60).join(', ');
   const clave = (v) => { const c = String(v ?? ''); if (c.length < 8) falla(400, 'La contraseña debe tener al menos 8 caracteres.'); return c; };
   const marcado = (v) => v === true || v === 'true' || v === '1' || v === 'on' || v === 1;
 

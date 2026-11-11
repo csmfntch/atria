@@ -15,8 +15,17 @@ export const CATEGORIAS = [
   { nombre: 'Humanidades', materias: ['Ciencias sociales', 'Escritura'] },
   { nombre: 'Bienestar y espiritualidad', materias: ['Yoga', 'Pilates', 'Astrología', 'Reiki', 'Ángeles', 'Tarot'] },
   { nombre: 'Arte y creatividad', materias: ['Cerámica', 'Arte'] },
-  { nombre: 'Deportes', materias: ['Tenis', 'Pádel', 'Rutinas de ejercicio'] },
-  { nombre: 'Tecnología', materias: ['Inteligencia artificial'] },
+  { nombre: 'Deportes', materias: ['Tenis', 'Pádel', 'Rutinas de ejercicio', 'Golf'] },
+  { nombre: 'Tecnología', materias: ['Inteligencia artificial', 'UX/UI Design', 'Programación'] },
+  { nombre: 'Business', materias: ['Finanzas personales', 'Finanzas', 'Startups'] },
+  { nombre: 'Psicoterapia', materias: ['Psicoterapia'] },
+  { nombre: 'Danza', materias: ['Danza'] },
+  { nombre: 'Música', materias: ['Música'] },
+  { nombre: 'Juegos de mesa', materias: ['Juegos de mesa'] },
+  { nombre: 'Pastelería', materias: ['Pastelería'] },
+  { nombre: 'Cocina', materias: ['Cocina'] },
+  { nombre: 'Enología', materias: ['Enología'] },
+  { nombre: 'Decoración', materias: ['Decoración'] },
 ];
 export const MATERIAS = CATEGORIAS.flatMap((c) => c.materias);
 export const materiasDe = (categoria) => CATEGORIAS.find((c) => c.nombre === categoria)?.materias ?? [];

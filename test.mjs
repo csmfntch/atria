@@ -434,9 +434,9 @@ test('sesión, logout, archivos estáticos y cabeceras', async (t) => {
 test('catálogo por categorías, filtros del marketplace y materias válidas', async (t) => {
   const app = await iniciar(); t.after(app.cerrar);
   const cat = (await app.cliente()('GET', '/api/catalogo')).datos;
-  assert.deepEqual(cat.categorias.map((c) => c.nombre), ['Idiomas', 'Ciencias y números', 'Humanidades', 'Bienestar y espiritualidad', 'Arte y creatividad', 'Deportes', 'Tecnología']);
+  assert.deepEqual(cat.categorias.map((c) => c.nombre), ['Idiomas', 'Ciencias y números', 'Humanidades', 'Bienestar y espiritualidad', 'Arte y creatividad', 'Deportes', 'Tecnología', 'Business', 'Psicoterapia', 'Danza', 'Música', 'Juegos de mesa', 'Pastelería', 'Cocina', 'Enología', 'Decoración']);
   for (const m of ['Inglés', 'Francés', 'Alemán', 'Italiano', 'Matemáticas', 'Física', 'Química', 'Contabilidad', 'Ciencias sociales', 'Escritura', 'Yoga', 'Pilates',
-    'Astrología', 'Reiki', 'Ángeles', 'Tarot', 'Cerámica', 'Arte', 'Tenis', 'Pádel', 'Rutinas de ejercicio', 'Inteligencia artificial']) assert.ok(cat.materias.includes(m), m);
+    'Astrología', 'Reiki', 'Ángeles', 'Tarot', 'Cerámica', 'Arte', 'Tenis', 'Pádel', 'Rutinas de ejercicio', 'Inteligencia artificial', 'Golf', 'UX/UI Design', 'Programación', 'Finanzas personales', 'Finanzas', 'Startups', 'Psicoterapia', 'Danza', 'Música', 'Juegos de mesa', 'Pastelería', 'Cocina', 'Enología', 'Decoración']) assert.ok(cat.materias.includes(m), m);
 
   const { m, clase } = await mentorListo(app, 'Laura');
   await m('PUT', '/api/perfil', { nombre: 'Laura', ciudad: 'Bogotá D.C.', materias: 'Yoga, Tarot' });
@@ -1067,6 +1067,6 @@ test('intereses del estudiante: materias del catálogo y «Otra» con texto prop
   const lista = r.datos.usuario.intereses.split(', ');
   assert.equal(lista.filter((x) => x === 'Yoga').length, 1, 'sin repetidos');
   assert.ok(lista.every((x) => x.length <= 40), 'cada texto propio se limita a 40 caracteres');
-  r = await e('PUT', '/api/perfil', { ...base, intereses: Array.from({ length: 50 }, (_, i) => `Tema${i}`).join(', ') });
-  assert.equal(r.datos.usuario.intereses.split(', ').length, 30, 'máximo 30 intereses');
+  r = await e('PUT', '/api/perfil', { ...base, intereses: Array.from({ length: 80 }, (_, i) => `Tema${i}`).join(', ') });
+  assert.equal(r.datos.usuario.intereses.split(', ').length, 60, 'máximo 60 intereses');
 });

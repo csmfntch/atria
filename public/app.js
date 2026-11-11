@@ -95,7 +95,7 @@ function pintarNav() {
   $nav.innerHTML = enlaces.map(([h, t]) => {
     const activo = h === '#/perfil' ? cuenta.some((c) => actual.startsWith(c)) : actual.startsWith(h);
     return `<a href="${h}" ${activo ? 'aria-current="page"' : ''}>${esc(t)}</a>`;
-  }).join('') + (yo ? '<button data-accion="salir">Salir</button>' : '<a href="#/ingresar">Ingresar</a><a href="#/registro" class="btn chico">Crear cuenta</a>');
+  }).join('') + (yo && !yo.suscripcion.activa ? '<a href="#/suscripcion" class="btn chico activar">Activa tu suscripción</a>' : '') + (yo ? '<button data-accion="salir">Salir</button>' : '<a href="#/ingresar">Ingresar</a><a href="#/registro" class="btn chico">Crear cuenta</a>');
 }
 const tabsCuenta = (actual) => html`
   <div class="tabs" role="tablist">

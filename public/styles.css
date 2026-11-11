@@ -206,3 +206,6 @@ fieldset.materias{display:grid;gap:.8rem}
 
 .zona-peligro{border-color:#efb2bc}
 .zona-peligro h2{color:var(--error)}
+
+nav a.btn.activar{font-weight:700;color:var(--tinta);margin-left:auto;white-space:nowrap}
+@media(max-width:720px){nav a.btn.activar{margin-left:0}}

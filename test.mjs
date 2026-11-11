@@ -1070,3 +1070,52 @@ test('intereses del estudiante: materias del catálogo y «Otra» con texto prop
   r = await e('PUT', '/api/perfil', { ...base, intereses: Array.from({ length: 80 }, (_, i) => `Tema${i}`).join(', ') });
   assert.equal(r.datos.usuario.intereses.split(', ').length, 60, 'máximo 60 intereses');
 });
+
+test('calendario: .ics por reserva, enlace de suscripción privado y aviso de clases por calificar', async (t) => {
+  const app = await iniciar(); t.after(app.cerrar);
+  const { m, id, clase } = await mentorListo(app);
+  const sofia = await estudianteListo(app, 'Sofia');
+  const dani = await estudianteListo(app, 'Dani');
+  const manana = sumarDias(hoyCol(), 1);
+  const rid = (await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' })).datos.reserva.id;
+
+  // .ics de una reserva: solo para sus participantes; 09:00 en Bogotá = 14:00 UTC
+  let r = await sofia('GET', `/api/reservas/${rid}/ics`);
+  assert.equal(r.estado, 200);
+  assert.match(r.cabeceras.get('content-type'), /text\/calendar/);
+  const ics = r.datos.toString();
+  assert.match(ics, /BEGIN:VEVENT/);
+  assert.match(ics, new RegExp(`DTSTART:${manana.replace(/-/g, '')}T140000Z`));
+  assert.match(ics, new RegExp(`DTEND:${manana.replace(/-/g, '')}T150000Z`));
+  assert.match(ics, /STATUS:TENTATIVE/);
+  assert.equal((await m('GET', `/api/reservas/${rid}/ics`)).estado, 200, 'el mentor también');
+  assert.equal((await dani('GET', `/api/reservas/${rid}/ics`)).estado, 404, 'otro estudiante no');
+  assert.equal((await app.cliente()('GET', `/api/reservas/${rid}/ics`)).estado, 401);
+
+  // enlace de suscripción
+  await m('PUT', `/api/reservas/${rid}`, { estado: 'aceptada' });
+  const enlace = (await sofia('GET', '/api/calendario/enlace')).datos;
+  assert.match(enlace.url, /\/api\/calendario\/[a-f0-9]{48}\.ics$/);
+  assert.match(enlace.webcal, /^webcal:/);
+  const ruta = new URL(enlace.url).pathname;
+  r = await app.cliente()('GET', ruta); // sin sesión: el enlace es la credencial
+  assert.equal(r.estado, 200);
+  assert.match(r.datos.toString(), /STATUS:CONFIRMED/);
+  assert.ok(!r.datos.toString().includes('3001234567'), 'sin celulares en el calendario');
+  assert.equal((await app.cliente()('GET', '/api/calendario/' + '0'.repeat(48) + '.ics')).estado, 404);
+  const rutaDani = new URL((await dani('GET', '/api/calendario/enlace')).datos.url).pathname;
+  assert.equal((await app.cliente()('GET', rutaDani)).datos.toString().includes('BEGIN:VEVENT'), false, 'cada enlace muestra solo sus clases');
+  const nuevo = (await sofia('POST', '/api/calendario/regenerar')).datos;
+  assert.notEqual(nuevo.url, enlace.url);
+  assert.equal((await app.cliente()('GET', ruta)).estado, 404, 'el enlace anterior deja de servir');
+  assert.equal((await app.cliente()('GET', new URL(nuevo.url).pathname)).estado, 200);
+
+  // aviso de clases por calificar
+  assert.equal((await sofia('GET', '/api/yo')).datos.usuario.resenas_pendientes, 0);
+  const pasada = Number(app.db.prepare(`INSERT INTO reservas (clase_id, profesor_id, estudiante_id, fecha, hora, duracion_min, estado) VALUES (?,?,?,?,?,60,'aceptada')`)
+    .run(clase.id, id, (await sofia('GET', '/api/yo')).datos.usuario.id, sumarDias(hoyCol(), -1), '09:00').lastInsertRowid);
+  assert.equal((await sofia('GET', '/api/yo')).datos.usuario.resenas_pendientes, 1);
+  assert.equal((await m('GET', '/api/yo')).datos.usuario.resenas_pendientes, 0, 'solo estudiantes');
+  await sofia('POST', '/api/resenas', { reserva_id: pasada, calificacion: 5 });
+  assert.equal((await sofia('GET', '/api/yo')).datos.usuario.resenas_pendientes, 0, 'sin comentario también cuenta');
+});

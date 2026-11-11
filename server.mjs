@@ -11,9 +11,10 @@ import {
 } from './colombia.mjs';
 import {
   ErrorHTTP, Resp, falla, json, hashClave, verificarClave, texto, entero, listaTexto,
-  leerCookie, leerJSON, leerBinario, sqlAhora,
+  leerCookie, leerJSON, leerBinario, sqlAhora, hoyCol, minutosAhoraCol, aMinutos,
 } from './helpers.mjs';
 import { registrarAgenda } from './agenda.mjs';
+import { registrarCalendario } from './calendario.mjs';
 import { registrarSuscripcion } from './suscripcion.mjs';
 import { registrarVerificacion } from './verificacion.mjs';
 import { registrarAdmin } from './admin.mjs';
@@ -102,6 +103,14 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
       { id: 'horarios', ok: contar('SELECT COUNT(*) AS n FROM horarios WHERE profesor_id = ?') > 0, texto: 'Define tus horarios disponibles', enlace: '#/horarios' },
     ];
   };
+  // Clases aceptadas que ya terminaron y que el estudiante aún no ha calificado.
+  const resenasPendientes = (u) => {
+    if (u.rol !== 'estudiante') return 0;
+    const hoy = hoyCol(), ahora = minutosAhoraCol();
+    return q(`SELECT fecha, hora, duracion_min FROM reservas r WHERE estudiante_id = ? AND estado = 'aceptada' AND fecha <= ?
+      AND NOT EXISTS (SELECT 1 FROM resenas WHERE reserva_id = r.id)`).all(u.id, hoy)
+      .filter((r) => r.fecha < hoy || aMinutos(r.hora) + r.duracion_min <= ahora).length;
+  };
   const privado = (u) => ({
     ...publico(u), email: u.email, telefono: u.telefono, es_admin: !!u.es_admin,
     documento: u.documento, documento_origen: u.documento_origen, verificacion_estado: u.verificacion_estado, verificacion_nota: u.verificacion_nota, kyc_estado: u.kyc_estado,
@@ -110,7 +119,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     acudiente_nombre: u.acudiente_nombre, acudiente_celular: u.acudiente_celular,
     clave_temporal: !!u.clave_temporal, terminos_ok: u.terminos_version === TERMINOS_VERSION, terminos_version: u.terminos_version,
     verificacion_autorizada: !!u.verificacion_autorizada,
-    suscripcion: suscripcionDe(u), pasos: pasosDe(u),
+    suscripcion: suscripcionDe(u), pasos: pasosDe(u), resenas_pendientes: resenasPendientes(u),
   });
 
   // Una clase es visible al público si el mentor está verificado y su suscripción está activa.
@@ -274,7 +283,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
       q(`UPDATE reservas SET estado = 'cancelada' WHERE (profesor_id = ? OR estudiante_id = ?) AND estado IN ('pendiente','aceptada') AND fecha >= ?`).run(usuario.id, usuario.id, hoy);
       q(`UPDATE usuarios SET email = ?, nombre = 'Cuenta eliminada', pass_hash = '!', ciudad = '', telefono = '', bio = '', materias = '', tarifa = 0,
          experiencia = '', documento = '', nivel = '', intereses = '', colegio_nombre = '', localidad = '', grado = '', acudiente_nombre = '',
-         acudiente_celular = '', kyc_sesion = '', kyc_resultado = '', verificacion_nota = '', suspendido = 1 WHERE id = ?`).run(`eliminado-${usuario.id}@artia.invalid`, usuario.id);
+         acudiente_celular = '', kyc_sesion = '', kyc_resultado = '', verificacion_nota = '', cal_token = '', suspendido = 1 WHERE id = ?`).run(`eliminado-${usuario.id}@artia.invalid`, usuario.id);
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     res.setHeader('Set-Cookie', 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
@@ -467,6 +476,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   });
 
   registrarAgenda(ctx);
+  registrarCalendario(ctx);
   registrarSuscripcion(ctx);
   registrarVerificacion(ctx);
   registrarAdmin(ctx);

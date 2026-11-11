@@ -134,7 +134,7 @@ export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, ex
         }
         return {
           id: r.id, clase_id: r.clase_id, profesor_id: r.profesor_id, titulo: r.titulo, materia: r.materia,
-          precio_hora: r.precio_hora, modalidad: r.modalidad, fecha: r.fecha, hora: r.hora, duracion_min: r.duracion_min,
+          precio_hora: r.precio_hora, modalidad: r.modalidad, clase_ciudad: r.clase_ciudad, fecha: r.fecha, hora: r.hora, duracion_min: r.duracion_min,
           estado: r.estado, mensaje: r.mensaje, creado: r.creado, terminada: fin,
           estudiante_nombre: r.estudiante_nombre, profesor_nombre: r.profesor_nombre,
           ...(esProf ? { estudiante_grado: r.estudiante_grado, estudiante_colegio_tipo: r.estudiante_colegio_tipo } : {}),

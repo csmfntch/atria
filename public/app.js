@@ -76,6 +76,7 @@ function avisosCuenta() {
   } else if (s.activa && Date.parse(s.vence.replace(' ', 'T') + 'Z') - Date.now() < 5 * 86400000) {
     items.push(html`Tu suscripción vence el ${fechaSQL(s.vence)}. <a href="#/suscripcion">Renovar</a>`);
   }
+  if (yo.resenas_pendientes) items.push(html`Tienes ${yo.resenas_pendientes} ${yo.resenas_pendientes === 1 ? 'clase' : 'clases'} por calificar. <a href="#/agenda">Calificar ahora</a>`);
   if (yo.rol === 'estudiante' && perfilEstudianteIncompleto(yo)) items.push(html`Completa tu perfil (colegio y acudiente si eres menor) para poder reservar. <a href="#/perfil">Ir a mi perfil</a>`);
   return items.length ? html`<div class="banner" role="status">${items.map((i) => html`<p>${i}</p>`)}</div>` : html``;
 }
@@ -614,6 +615,13 @@ async function vistaSolicitudes() {
 }
 
 // ---------- agenda (reservas de ambos roles) ----------
+const aUTC = (fecha, min) => new Date(Date.UTC(+fecha.slice(0, 4), +fecha.slice(5, 7) - 1, +fecha.slice(8, 10), 5, min)).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+function enlaceGoogle(r, otro) {
+  const ini = +r.hora.slice(0, 2) * 60 + +r.hora.slice(3, 5);
+  const p = new URLSearchParams({ action: 'TEMPLATE', text: `${r.titulo} — con ${otro}`, dates: `${aUTC(r.fecha, ini)}/${aUTC(r.fecha, ini + r.duracion_min)}`,
+    details: `Clase de ${r.materia} en Artia. Detalles: ${location.origin}/#/agenda`, location: r.modalidad === 'virtual' ? 'Virtual' : (r.clase_ciudad ?? ''), ctz: 'America/Bogota' });
+  return 'https://calendar.google.com/calendar/render?' + p;
+}
 function tarjetaReserva(r, esProf) {
   const otro = esProf ? r.estudiante_nombre : r.profesor_nombre;
   return html`
@@ -629,6 +637,9 @@ function tarjetaReserva(r, esProf) {
         ${r.contacto ? html`<p>Contacto con ${r.contacto_de}: <a href="https://wa.me/57${r.contacto}" target="_blank" rel="noopener">WhatsApp ${celular(r.contacto)}</a></p>`
           : r.estado === 'aceptada' ? html`<p class="suave">La otra persona aún no tiene celular en su perfil.</p>` : ''}
         ${r.resena ? html`<p>${esProf ? 'Reseña del estudiante' : 'Tu reseña'}: ${estrellas(r.resena.calificacion)} ${r.resena.comentario}</p>` : ''}
+        ${r.estado === 'aceptada' && !r.terminada ? html`<p class="acciones-fila">
+          <a class="btn sec chico" href="${enlaceGoogle(r, otro)}" target="_blank" rel="noopener">📅 Google Calendar</a>
+          <a class="btn sec chico" href="/api/reservas/${r.id}/ics" download>📅 Apple / Outlook (.ics)</a></p>` : ''}
         <div class="acciones-fila">
           ${esProf && r.estado === 'pendiente' && !r.terminada ? html`
             <button class="btn chico" data-accion="reserva" data-id="${r.id}" data-estado="aceptada">Aceptar</button>
@@ -653,16 +664,22 @@ async function vistaAgenda() {
   const { reservas } = await api('GET', '/api/reservas');
   const esProf = yo.rol === 'profesor';
   const proximas = reservas.filter((r) => !r.terminada && ['pendiente', 'aceptada'].includes(r.estado)).sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
-  const historial = reservas.filter((r) => !proximas.includes(r));
+  const porCalificar = reservas.filter((r) => r.puede_resenar);
+  const historial = reservas.filter((r) => !proximas.includes(r) && !porCalificar.includes(r));
   const porDia = (lista) => [...new Set(lista.map((r) => r.fecha))].map((f) => html`
     <section><h3 class="dia-titulo">${cap(diaLargo(f))}</h3>${lista.filter((r) => r.fecha === f).map((r) => tarjetaReserva(r, esProf))}</section>`);
   const porRevisar = esProf ? proximas.filter((r) => r.estado === 'pendiente').length : 0;
   pintar(html`
     <h1>${esProf ? 'Mi agenda' : 'Mi agenda de clases'}</h1>
     ${porRevisar ? html`<p class="banner espera">Tienes ${porRevisar} ${porRevisar === 1 ? 'solicitud pendiente' : 'solicitudes pendientes'} por responder.</p>` : ''}
+    ${porCalificar.length ? html`<h2>Por calificar</h2><p class="suave">Tu opinión ayuda a otros estudiantes y a tu mentor. Elige las estrellas; escribir un comentario es opcional.</p>${porCalificar.map((r) => tarjetaReserva(r, esProf))}` : ''}
     <h2>Próximas clases</h2>
     ${proximas.length ? porDia(proximas) : html`<p class="vacio">No tienes clases próximas. ${esProf ? 'Cuando un estudiante reserve, aparecerá aquí.' : html`<a href="#/clases">Busca una clase</a> y reserva tu horario.`}</p>`}
-    ${historial.length ? html`<h2 style="margin-top:2rem">Historial</h2>${porDia(historial)}` : ''}`);
+    ${historial.length ? html`<h2 style="margin-top:2rem">Historial</h2>${porDia(historial)}` : ''}
+    <details class="tarjeta" style="margin-top:2rem"><summary><b>📅 Sincroniza tu calendario</b></summary>
+      <p class="suave">Agrega este enlace una sola vez a Google Calendar, Apple Calendar u Outlook y tus clases aparecerán (y se actualizarán) solas. Es personal: no lo compartas.</p>
+      <div id="cal-caja"><button class="btn chico" data-accion="cal-enlace">Obtener mi enlace</button></div>
+    </details>`);
 }
 
 // ---------- administración ----------
@@ -914,6 +931,15 @@ document.addEventListener('click', async (ev) => {
     if (accion === 'kyc-simular') {
       const r = await api('POST', '/api/kyc/simular', { desenlace: b.dataset.desenlace });
       await refrescarYo(); avisar(r.estado === 'verificado' ? '¡Verificado automáticamente!' : 'Resultado procesado'); await enrutar(); return;
+    }
+    if (accion === 'cal-enlace' || accion === 'cal-regenerar') {
+      if (accion === 'cal-regenerar' && !confirm('El enlace anterior dejará de funcionar. ¿Generar uno nuevo?')) return;
+      const c = await api(accion === 'cal-enlace' ? 'GET' : 'POST', accion === 'cal-enlace' ? '/api/calendario/enlace' : '/api/calendario/regenerar');
+      document.getElementById('cal-caja').innerHTML = `<label>Tu enlace de calendario<input readonly value="${esc(c.url)}" onclick="this.select()"></label>
+        <p class="acciones-fila"><a class="btn chico" href="${esc(c.webcal)}">Abrir en mi app de calendario</a>
+        <a class="btn sec chico" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/r?cid=${encodeURIComponent(c.webcal)}">Agregar a Google Calendar</a>
+        <button class="btn sec chico" data-accion="cal-regenerar">Generar enlace nuevo</button></p>`;
+      return;
     }
     if (accion === 'aceptar-terminos') { ({ usuario: yo } = await api('POST', '/api/terminos/aceptar', { acepta_terminos: true })); avisar('Gracias por aceptar'); await enrutar(); return; }
     if (accion === 'enviar-verificacion') { await api('POST', '/api/verificacion/enviar'); await refrescarYo(); avisar(yo.verificacion_estado === 'verificado' ? '¡Verificado! Tus clases ya muestran la insignia.' : 'Enviado a revisión'); await enrutar(); }

@@ -189,6 +189,7 @@ export function abrirBD(ruta) {
     ['documento_origen', `TEXT NOT NULL DEFAULT 'colombiano'`],
     ['kyc_estado', `TEXT NOT NULL DEFAULT ''`], ['kyc_sesion', `TEXT NOT NULL DEFAULT ''`], ['kyc_resultado', `TEXT NOT NULL DEFAULT ''`],
   ]) agregarColumna(db, 'usuarios', col, def);
+  agregarColumna(db, 'usuarios', 'cal_token', `TEXT NOT NULL DEFAULT ''`);
   agregarColumna(db, 'documentos', 'ruta', `TEXT NOT NULL DEFAULT ''`);
 
   return db;

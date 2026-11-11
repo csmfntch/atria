@@ -90,13 +90,13 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     const suscrita = suscripcionDe(u).activa;
     if (u.rol === 'estudiante') {
       return [
-        { id: 'perfil', ok: !perfilEstudianteFalta(u), texto: 'Completa tu perfil (ciudad y colegio)', enlace: '#/perfil' },
+        { id: 'perfil', ok: !perfilEstudianteFalta(u), texto: 'Completa tu perfil', enlace: '#/perfil' },
         { id: 'suscripcion', ok: suscrita, texto: 'Activa tu suscripción', enlace: '#/suscripcion' },
         { id: 'reserva', ok: contar('SELECT COUNT(*) AS n FROM reservas WHERE estudiante_id = ?') > 0, texto: 'Reserva tu primera clase', enlace: '#/clases' },
       ];
     }
     return [
-      { id: 'perfil', ok: !!(u.ciudad && u.telefono && u.materias && u.tarifa > 0), texto: 'Completa tu perfil (ciudad, celular, materias y tarifa)', enlace: '#/perfil' },
+      { id: 'perfil', ok: !!(u.ciudad && u.telefono && u.materias && u.tarifa > 0), texto: 'Completa tu perfil', enlace: '#/perfil' },
       { id: 'verificacion', ok: u.verificacion_estado === 'verificado', nota: u.verificacion_estado === 'pendiente' ? 'En revisión' : '', texto: 'Verifica tu identidad (cédula y título)', enlace: '#/verificacion' },
       { id: 'suscripcion', ok: suscrita, texto: 'Activa tu suscripción', enlace: '#/suscripcion' },
       { id: 'clase', ok: contar('SELECT COUNT(*) AS n FROM clases WHERE profesor_id = ?') > 0, texto: 'Publica tu primera clase', enlace: '#/mis-clases' },

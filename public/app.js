@@ -390,8 +390,9 @@ async function vistaSuscripcion(params) {
       <ul class="beneficios">
         ${yo.rol === 'profesor'
           ? html`<li>Tus clases visibles para estudiantes de toda Colombia</li><li>Agenda con reservas por horario</li><li>Insignia de mentor verificado</li><li>Respuesta a solicitudes de estudiantes</li>`
-          : html`<li>Reserva clases con mentores verificados</li><li>Agenda de tus clases en un solo lugar</li><li>Publica lo que buscas y recibe ofertas</li><li>Deja reseñas de tus mentores</li>`}
+          : html`<li>Mentores con identidad verificada (cédula, selfie y título revisados)</li><li>Acceso a toda la oferta de clases</li><li>Agenda para reservar y ver tus clases en un solo lugar</li><li>Contacto directo con tu mentor por WhatsApp al confirmar la reserva</li><li>Publica lo que buscas y recibe ofertas</li><li>Reseñas reales de otros estudiantes</li>`}
       </ul>
+      <p class="suave">Con tu suscripción mantenemos la plataforma segura: verificamos a cada mentor, cuidamos tus datos y te damos la agenda y las herramientas para reservar sin complicaciones.</p>
       ${s.activa ? html`<p>Vigente hasta el <b>${fechaSQL(s.vence)}</b>. Si renuevas ahora, se suman 30 días a tu fecha de vencimiento.</p>` : ''}
       <div id="error"></div>
       ${modo === 'ninguno' ? html`<p class="error">Los pagos aún no están disponibles. Intenta más tarde.</p>`

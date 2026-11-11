@@ -71,7 +71,7 @@ function avisosCuenta() {
       ? html`Estamos revisando tu verificación. Tus clases serán públicas cuando la aprobemos.`
       : html`Tus clases no son visibles hasta que <a href="#/verificacion">verifiques tu identidad</a>.`);
   }
-  if (!s.activa) {
+  if (!s.activa && yo.rol === 'profesor') {
     items.push(html`${yo.rol === 'profesor' ? 'Activa tu suscripción para publicar tus clases y recibir reservas.' : 'Activa tu suscripción para reservar clases.'} <a href="#/suscripcion">Ir a suscripción</a>`);
   } else if (Date.parse(s.vence.replace(' ', 'T') + 'Z') - Date.now() < 5 * 86400000) {
     items.push(html`Tu suscripción vence el ${fechaSQL(s.vence)}. <a href="#/suscripcion">Renovar</a>`);
@@ -184,8 +184,8 @@ async function vistaClase(id) {
   else if (esDueno) reserva = html`<p class="tarjeta suave">Esta es tu clase. Administra tus horarios en <a href="#/horarios">Horarios</a>.</p>`;
   else if (!yo) reserva = html`<p class="tarjeta"><a href="#/ingresar?rol=estudiante">Ingresa</a> o <a href="#/registro?rol=estudiante">crea una cuenta de estudiante</a> para reservar esta clase.</p>`;
   else if (yo.rol !== 'estudiante') reserva = html`<p class="tarjeta suave">Solo las cuentas de estudiante pueden reservar clases.</p>`;
-  else if (!yo.suscripcion.activa) reserva = html`<p class="tarjeta">Para reservar necesitas una suscripción activa. <a class="btn chico" href="#/suscripcion">Activar suscripción</a></p>`;
   else if (perfilEstudianteIncompleto(yo)) reserva = html`<p class="tarjeta">Antes de reservar completa tu perfil (colegio público o privado y, si eres menor, tu acudiente). <a class="btn chico" href="#/perfil">Completar perfil</a></p>`;
+  else if (!yo.suscripcion.activa) reserva = html`<div class="tarjeta"><p>Para reservar esta clase activa tu suscripción mensual de <b>${cop(yo.suscripcion.precio)}</b>. Al terminar el pago volverás aquí para elegir tu horario.</p><button class="btn" data-accion="pagar" data-volver="${c.id}">Pagar suscripción y reservar</button></div>`;
   else {
     const { dias, duracion_min } = await api('GET', `/api/clases/${c.id}/disponibilidad`);
     reserva = html`
@@ -374,6 +374,10 @@ function sincronizarPerfil(f) {
 // ---------- suscripción ----------
 async function vistaSuscripcion(params) {
   const { suscripcion: s, modo, pagos } = await api('GET', '/api/suscripcion');
+  if (params.get('pago') === 'ok') {
+    let v = null; try { v = sessionStorage.getItem('volverClase'); sessionStorage.removeItem('volverClase'); } catch {}
+    if (v && /^\d+$/.test(v)) { await refrescarYo(); avisar('¡Pago aprobado! Ya puedes elegir tu horario.'); location.hash = `#/clase/${v}`; return; }
+  }
   const resultado = { ok: ['ok', '¡Pago aprobado! Tu suscripción está activa.'], pendiente: ['espera', 'Tu pago está en proceso. Se activará en cuanto el banco lo confirme.'], fallo: ['mal', 'El pago no se completó. Puedes intentarlo de nuevo.'] }[params.get('pago')];
   pintar(html`
     ${tabsCuenta('suscripcion')}
@@ -821,12 +825,14 @@ document.addEventListener('submit', async (ev) => {
         const reg = f.dataset.form === 'registro';
         ({ usuario: yo } = await api('POST', reg ? '/api/registro' : '/api/login', { ...d, es_menor: 'es_menor' in d, acepta_terminos: 'acepta_terminos' in d, autoriza_verificacion: 'autoriza_verificacion' in d }));
         avisar(reg ? '¡Cuenta creada! Sigue los primeros pasos.' : `¡Hola de nuevo, ${yo.nombre.split(' ')[0]}!`);
-        location.hash = reg || yo.pasos.some((p) => !p.ok) ? '#/empezar' : yo.rol === 'profesor' ? '#/agenda' : '#/clases';
+        location.hash = reg && yo.rol === 'estudiante' ? '#/perfil' : reg || yo.pasos.some((p) => !p.ok) ? '#/empezar' : yo.rol === 'profesor' ? '#/agenda' : '#/clases';
         break;
       }
       case 'perfil':
         ({ usuario: yo } = await api('PUT', '/api/perfil', { ...d, es_menor: 'es_menor' in d, ...(yo.rol === 'estudiante' ? { intereses: [d.intereses, 'intereses_otra_check' in d ? d.intereses_otra : ''].filter(Boolean).join(', ') } : {}) }));
-        avisar('Perfil guardado'); pintarNav(); await enrutar(); break;
+        avisar('Perfil guardado'); pintarNav();
+        if (yo.rol === 'estudiante' && !perfilEstudianteIncompleto(yo)) { if (location.hash === '#/clases') await enrutar(); else location.hash = '#/clases'; } else await enrutar();
+        break;
       case 'documento':
         await api('PUT', '/api/perfil', { nombre: yo.nombre, ciudad: yo.ciudad, telefono: yo.telefono, bio: yo.bio, materias: yo.materias, tarifa: yo.tarifa, modalidad: yo.modalidad, experiencia: yo.experiencia, documento: d.documento });
         await refrescarYo(); avisar('Cédula guardada'); await enrutar(); break;
@@ -911,10 +917,13 @@ document.addEventListener('click', async (ev) => {
     if (accion === 'enviar-verificacion') { await api('POST', '/api/verificacion/enviar'); await refrescarYo(); avisar(yo.verificacion_estado === 'verificado' ? '¡Verificado! Tus clases ya muestran la insignia.' : 'Enviado a revisión'); await enrutar(); }
     if (accion === 'pagar') {
       b.disabled = true;
+      try { if (b.dataset.volver) sessionStorage.setItem('volverClase', b.dataset.volver); else sessionStorage.removeItem('volverClase'); } catch {}
       const p = await api('POST', '/api/pagos/iniciar');
       if (p.modo === 'wompi') { location.href = p.url; return; }
       await api('POST', '/api/pagos/simular', { pago_id: p.pago_id });
-      await refrescarYo(); avisar('Suscripción activada (modo de pruebas)'); await enrutar();
+      await refrescarYo(); avisar('Suscripción activada (modo de pruebas)');
+      let v = null; try { v = sessionStorage.getItem('volverClase'); sessionStorage.removeItem('volverClase'); } catch {}
+      if (v && /^\d+$/.test(v)) location.hash = `#/clase/${v}`; else await enrutar();
     }
     if (accion === 'suspender') {
       const suspender = estado === 'si';

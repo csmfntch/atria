@@ -91,8 +91,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     if (u.rol === 'estudiante') {
       return [
         { id: 'perfil', ok: !perfilEstudianteFalta(u), texto: 'Completa tu perfil', enlace: '#/perfil' },
-        { id: 'suscripcion', ok: suscrita, texto: 'Activa tu suscripción', enlace: '#/suscripcion' },
-        { id: 'reserva', ok: contar('SELECT COUNT(*) AS n FROM reservas WHERE estudiante_id = ?') > 0, texto: 'Reserva tu primera clase', enlace: '#/clases' },
+        { id: 'reserva', ok: contar('SELECT COUNT(*) AS n FROM reservas WHERE estudiante_id = ?') > 0, texto: 'Elige y reserva tu primera clase (pagas la suscripción al reservar)', enlace: '#/clases' },
       ];
     }
     return [

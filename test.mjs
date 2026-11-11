@@ -463,12 +463,12 @@ test('primeros pasos y precios por defecto', async (t) => {
   const app = await iniciar(); t.after(app.cerrar);
   const e = app.cliente(); await registrar(e, 'estudiante', 'Ana', { colegio_tipo: 'privado' });
   let u = (await e('GET', '/api/yo')).datos.usuario;
-  assert.deepEqual(u.pasos.map((p) => p.ok), [false, false, false]);
+  assert.deepEqual(u.pasos.map((p) => p.ok), [false, false]);
   assert.equal(u.suscripcion.precio, 24900, 'estudiante: $24.900 al mes');
   await e('PUT', '/api/perfil', { nombre: 'Ana', ciudad: 'Bogotá D.C.', colegio_tipo: 'privado', colegio_nombre: 'Colegio X' });
   await pagarSimulado(e);
   u = (await e('GET', '/api/yo')).datos.usuario;
-  assert.deepEqual(u.pasos.map((p) => p.ok), [true, true, false]);
+  assert.deepEqual(u.pasos.map((p) => p.ok), [true, false]);
 
   const m = app.cliente(); await registrar(m, 'profesor', 'Luis');
   u = (await m('GET', '/api/yo')).datos.usuario;

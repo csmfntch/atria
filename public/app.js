@@ -73,7 +73,7 @@ function avisosCuenta() {
   }
   if (!s.activa && yo.rol === 'profesor') {
     items.push(html`${yo.rol === 'profesor' ? 'Activa tu suscripción para publicar tus clases y recibir reservas.' : 'Activa tu suscripción para reservar clases.'} <a href="#/suscripcion">Ir a suscripción</a>`);
-  } else if (s.activa && Date.parse(s.vence.replace(' ', 'T') + 'Z') - Date.now() < 5 * 86400000) {
+  } else if (s.activa && s.vence && Date.parse(s.vence.replace(' ', 'T') + 'Z') - Date.now() < 5 * 86400000) {
     items.push(html`Tu suscripción vence el ${fechaSQL(s.vence)}. <a href="#/suscripcion">Renovar</a>`);
   }
   if (yo.resenas_pendientes) items.push(html`Tienes ${yo.resenas_pendientes} ${yo.resenas_pendientes === 1 ? 'clase' : 'clases'} por calificar. <a href="#/agenda">Calificar ahora</a>`);
@@ -87,12 +87,12 @@ function pintarNav() {
   const enlaces = [['#/clases', 'Buscar clases']];
   const pendientes = yo ? yo.pasos.filter((p) => !p.ok).length : 0;
   if (pendientes) enlaces.unshift(['#/empezar', `Primeros pasos (${yo.pasos.length - pendientes}/${yo.pasos.length})`]);
-  if (yo?.rol === 'profesor') enlaces.push(['#/mis-clases', 'Mis clases'], ['#/horarios', 'Horarios'], ['#/agenda', 'Agenda'], ['#/solicitudes', 'Solicitudes']);
+  if (yo?.rol === 'profesor') enlaces.push(['#/mis-clases', 'Mis clases'], ['#/horarios', 'Horarios'], ['#/agenda', 'Agenda'], ['#/solicitudes', 'Solicitudes'], ['#/ganancias', 'Ganancias']);
   if (yo?.rol === 'estudiante') enlaces.push(['#/agenda', 'Mi agenda'], ['#/solicitudes', 'Lo que busco']);
   if (yo?.es_admin) enlaces.push(['#/admin', 'Administración']);
   if (yo) enlaces.push(['#/perfil', 'Mi cuenta']);
   const actual = location.hash || '#/';
-  const cuenta = ['#/perfil', '#/suscripcion', '#/verificacion'];
+  const cuenta = ['#/perfil', '#/suscripcion', '#/verificacion', '#/ganancias'];
   $nav.innerHTML = enlaces.map(([h, t]) => {
     const activo = h === '#/perfil' ? cuenta.some((c) => actual.startsWith(c)) : actual.startsWith(h);
     return `<a href="${h}" ${activo ? 'aria-current="page"' : ''}>${esc(t)}</a>`;
@@ -101,7 +101,7 @@ function pintarNav() {
 const tabsCuenta = (actual) => html`
   <div class="tabs" role="tablist">
     <a href="#/perfil" class="${actual === 'perfil' ? 'activa' : ''}">Perfil</a>
-    <a href="#/suscripcion" class="${actual === 'suscripcion' ? 'activa' : ''}">Suscripción</a>
+    ${yo.rol === 'estudiante' ? html`<a href="#/suscripcion" class="${actual === 'suscripcion' ? 'activa' : ''}">Suscripción</a>` : html`<a href="#/ganancias" class="${actual === 'ganancias' ? 'activa' : ''}">Ganancias</a>`}
     ${yo.rol === 'profesor' ? html`<a href="#/verificacion" class="${actual === 'verificacion' ? 'activa' : ''}">Verificación</a>` : ''}
   </div>`;
 
@@ -200,8 +200,8 @@ async function vistaClase(id) {
           </fieldset>`) : html`<p class="vacio">El mentor no tiene horarios libres en los próximos días. Prueba más tarde o <a href="#/solicitudes">publica lo que buscas</a>.</p>`}
         ${dias.length ? html`
           <label>Mensaje para el mentor (opcional)<textarea name="mensaje" maxlength="500" placeholder="Cuéntale tu nivel y qué quieres trabajar"></textarea></label>
-          <button class="btn">Solicitar clase</button>
-          <p class="suave">El mentor confirmará tu reserva. Cuando la acepte, verás su WhatsApp para coordinar.</p>` : ''}
+          <button class="btn">Pagar y reservar ${cop(Math.round(c.precio_hora * duracion_min / 60))}</button>
+          <p class="suave">Pagas la clase ahora, de forma segura, a través de Artia. El mentor confirma tu reserva y, cuando la acepte, verás su WhatsApp para coordinar. Si no la acepta o no puede darte la clase, te devolvemos todo. Puedes cancelar sin costo hasta 24 horas antes.</p>` : ''}
       </form>`;
   }
   pintar(html`
@@ -391,7 +391,7 @@ async function vistaSuscripcion(params) {
       <ul class="beneficios">
         ${yo.rol === 'profesor'
           ? html`<li>Tus clases visibles para estudiantes de toda Colombia</li><li>Agenda con reservas por horario</li><li>Insignia de mentor verificado</li><li>Respuesta a solicitudes de estudiantes</li>`
-          : html`<li>Mentores con identidad verificada (cédula, selfie y título revisados)</li><li>Acceso a toda la oferta de clases</li><li>Agenda para reservar y ver tus clases en un solo lugar</li><li>Contacto directo con tu mentor por WhatsApp al confirmar la reserva</li><li>Publica lo que buscas y recibe ofertas</li><li>Reseñas reales de otros estudiantes</li>`}
+          : html`<li>Mentores con identidad verificada (cédula, selfie y título revisados)</li><li>Pagos seguros a través de Artia y devolución si la clase no se da</li><li>Acceso a toda la oferta de clases</li><li>Agenda para reservar y ver tus clases en un solo lugar</li><li>Contacto directo con tu mentor por WhatsApp al confirmar la reserva</li><li>Publica lo que buscas y recibe ofertas</li><li>Reseñas reales de otros estudiantes</li>`}
       </ul>
       <p class="suave">Con tu suscripción mantenemos la plataforma segura: verificamos a cada mentor, cuidamos tus datos y te damos la agenda y las herramientas para reservar sin complicaciones.</p>
       ${s.activa ? html`<p>Vigente hasta el <b>${fechaSQL(s.vence)}</b>. Si renuevas ahora, se suman 30 días a tu fecha de vencimiento.</p>` : ''}
@@ -628,11 +628,14 @@ function tarjetaReserva(r, esProf) {
     <article class="tarjeta reserva">
       <div class="hora"><b>${hora12(r.hora)}</b><span class="suave">a ${hora12(finHora(r.hora, r.duracion_min))}</span></div>
       <div class="detalle">
-        <span class="etiqueta ${ESTADO[r.estado]}">${ESTADO_TXT[r.estado]}</span>
+        <span class="etiqueta ${r.pago_estado === 'por_pagar' ? 'espera' : ESTADO[r.estado]}">${r.pago_estado === 'por_pagar' ? 'Pendiente de pago' : ESTADO_TXT[r.estado]}</span>
         <h3><a href="#/clase/${r.clase_id}">${r.titulo}</a></h3>
         <p class="suave">${esProf ? 'Estudiante' : 'Mentor'}: ${esProf ? otro : html`<a href="#/profesor/${r.profesor_id}">${otro}</a>`}
           ${esProf && r.estudiante_grado ? ' · ' + r.estudiante_grado : ''}${esProf && r.estudiante_colegio_tipo && r.estudiante_colegio_tipo !== 'ninguno' ? ' · ' + COLEGIO[r.estudiante_colegio_tipo] : ''}
           · ${MOD[r.modalidad]} · ${cop(r.precio_hora)} / hora</p>
+        ${r.monto_cop ? (esProf
+          ? html`<p class="suave">Recibes <b>${cop(r.neto_cop)}</b> <span class="suave">(valor ${cop(r.monto_cop)} − comisión de Artia ${cop(r.comision_cop)})</span> · se te paga con la liquidación mensual</p>`
+          : html`<p class="suave">${{ por_pagar: 'Total a pagar', pagado: 'Pagado', reembolso_pendiente: 'Devolución en proceso', reembolsado: 'Devuelto' }[r.pago_estado] ?? 'Valor'}: <b>${cop(r.monto_cop)}</b>${r.pago_estado === 'reembolso_pendiente' ? ' · te lo devolveremos a tu medio de pago' : ''}</p>`) : ''}
         ${r.mensaje ? html`<p>“${r.mensaje}”</p>` : ''}
         ${r.contacto ? html`<p>Contacto con ${r.contacto_de}: <a href="https://wa.me/57${r.contacto}" target="_blank" rel="noopener">WhatsApp ${celular(r.contacto)}</a></p>`
           : r.estado === 'aceptada' ? html`<p class="suave">La otra persona aún no tiene celular en su perfil.</p>` : ''}
@@ -644,8 +647,8 @@ function tarjetaReserva(r, esProf) {
           ${esProf && r.estado === 'pendiente' && !r.terminada ? html`
             <button class="btn chico" data-accion="reserva" data-id="${r.id}" data-estado="aceptada">Aceptar</button>
             <button class="btn peligro chico" data-accion="reserva" data-id="${r.id}" data-estado="rechazada">Rechazar</button>` : ''}
-          ${['pendiente', 'aceptada'].includes(r.estado) && !r.terminada && !(esProf && r.estado === 'pendiente') ? html`<button class="btn peligro chico" data-accion="reserva" data-id="${r.id}" data-estado="cancelada">Cancelar</button>` : ''}
-          ${!esProf && r.estado === 'pendiente' && !r.terminada ? html`<button class="btn peligro chico" data-accion="reserva" data-id="${r.id}" data-estado="cancelada">Cancelar</button>` : ''}
+          ${['pendiente', 'aceptada'].includes(r.estado) && !r.terminada && !(esProf && r.estado === 'pendiente') ? html`<button class="btn peligro chico" data-accion="reserva" data-id="${r.id}" data-estado="cancelada" ${!esProf && r.estado === 'aceptada' && r.pago_estado === 'pagado' && (Date.parse(`${r.fecha}T${r.hora}:00-05:00`) - Date.now()) < 24 * 3600000 ? new Raw('data-sin-devolucion="1"') : ''}>Cancelar</button>` : ''}
+          ${!esProf && r.pago_estado === 'por_pagar' ? html`<button class="btn chico" data-accion="pagar-reserva" data-id="${r.id}">Pagar ahora ${cop(r.monto_cop)}</button>` : ''}
         </div>
         ${r.puede_resenar ? html`
           <form class="campos resena" data-form="resena" data-id="${r.id}">
@@ -660,7 +663,13 @@ function tarjetaReserva(r, esProf) {
       </div>
     </article>`;
 }
-async function vistaAgenda() {
+/** Lleva al estudiante al pago de su clase (Wompi) o, en pruebas, lo aprueba al instante. */
+async function pagarClase(pago) {
+  if (pago.modo === 'wompi') { location.href = pago.url; return; }
+  await api('POST', '/api/pagos/simular', { pago_id: pago.pago_id });
+  avisar('Pago aprobado (modo de pruebas). El mentor ya puede aceptar tu reserva.'); location.hash = '#/agenda?pago=ok'; await enrutar();
+}
+async function vistaAgenda(params = new URLSearchParams()) {
   const { reservas } = await api('GET', '/api/reservas');
   const esProf = yo.rol === 'profesor';
   const proximas = reservas.filter((r) => !r.terminada && ['pendiente', 'aceptada'].includes(r.estado)).sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
@@ -671,6 +680,7 @@ async function vistaAgenda() {
   const porRevisar = esProf ? proximas.filter((r) => r.estado === 'pendiente').length : 0;
   pintar(html`
     <h1>${esProf ? 'Mi agenda' : 'Mi agenda de clases'}</h1>
+    ${{ ok: html`<p class="banner ok" role="status">¡Pago recibido! Ahora el mentor debe aceptar tu reserva; te avisaremos por correo.</p>`, pendiente: html`<p class="banner espera" role="status">Tu pago está en proceso. Se confirmará en cuanto el banco lo apruebe.</p>`, fallo: html`<p class="banner mal" role="status">El pago no se completó y tu horario se liberó. Puedes intentarlo de nuevo desde la clase.</p>` }[params.get('pago')] ?? ''}
     ${porRevisar ? html`<p class="banner espera">Tienes ${porRevisar} ${porRevisar === 1 ? 'solicitud pendiente' : 'solicitudes pendientes'} por responder.</p>` : ''}
     ${porCalificar.length ? html`<h2>Por calificar</h2><p class="suave">Tu opinión ayuda a otros estudiantes y a tu mentor. Elige las estrellas; escribir un comentario es opcional.</p>${porCalificar.map((r) => tarjetaReserva(r, esProf))}` : ''}
     <h2>Próximas clases</h2>
@@ -682,8 +692,73 @@ async function vistaAgenda() {
     </details>`);
 }
 
+// ---------- ganancias del mentor ----------
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const nombreMes = (m) => `${MESES[+m.slice(5, 7) - 1]} de ${m.slice(0, 4)}`;
+async function vistaGanancias() {
+  const g = await api('GET', '/api/ganancias');
+  const c = g.cuenta;
+  pintar(html`
+    ${tabsCuenta('ganancias')}
+    <h1>Ganancias</h1>
+    <p class="suave">Publicar tus clases en Artia no cuesta nada. El estudiante paga la clase a Artia al reservar, y cada mes te pagamos lo acumulado, descontando una comisión de <b>${g.comision_pct}%</b>.</p>
+    <article class="tarjeta">
+      <h2>Por pagarte</h2>
+      ${g.por_liquidar.length ? g.por_liquidar.map((m) => html`<p><b>${cap(nombreMes(m.mes))}</b>: ${m.n} ${m.n === 1 ? 'clase' : 'clases'} · valor ${cop(m.bruto)} − comisión ${cop(m.comision)} = <b>${cop(m.neto)}</b></p>`)
+        : html`<p class="suave">Aún no tienes clases dadas pendientes de pago.</p>`}
+      ${g.clases_por_realizar ? html`<p class="suave">${g.clases_por_realizar} ${g.clases_por_realizar === 1 ? 'clase pagada y confirmada está' : 'clases pagadas y confirmadas están'} por realizarse; sumarán a tus ganancias cuando se den.</p>` : ''}
+    </article>
+    <form class="tarjeta campos" data-form="cuenta">
+      <h2>Datos para recibir tus pagos</h2>
+      <div id="error"></div>
+      ${c.numero ? '' : html`<p class="banner espera">Agrega tu cuenta para que podamos pagarte cada mes.</p>`}
+      <div class="fila">
+        <label>Tipo<select name="tipo" required>${[['ahorros', 'Cuenta de ahorros'], ['corriente', 'Cuenta corriente'], ['nequi', 'Nequi'], ['daviplata', 'Daviplata']].map(([v, t]) => html`<option value="${v}" ${sel(c.tipo === v)}>${t}</option>`)}</select></label>
+        <label>Banco (si es cuenta bancaria)<input name="banco" maxlength="60" value="${c.tipo === 'nequi' || c.tipo === 'daviplata' ? '' : c.banco}" placeholder="Bancolombia"></label>
+      </div>
+      <div class="fila">
+        <label>Número de cuenta o celular<input name="numero" inputmode="numeric" required value="${c.numero}"></label>
+        <label>Nombre del titular<input name="titular" required maxlength="80" value="${c.titular}" placeholder="Debe coincidir con tu cédula"></label>
+      </div>
+      <button class="btn">Guardar</button>
+      <p class="suave">Solo tú y el equipo de Artia pueden ver estos datos.</p>
+    </form>
+    ${g.liquidaciones.length ? html`<h2>Pagos recibidos</h2>${g.liquidaciones.map((l) => html`<article class="tarjeta"><b>${cap(nombreMes(l.mes))}</b> · ${l.clases} ${l.clases === 1 ? 'clase' : 'clases'} · <b>${cop(l.neto_cop)}</b> <span class="suave">(valor ${cop(l.bruto_cop)} − comisión ${cop(l.comision_cop)})</span><br><span class="suave">Transferencia ${l.referencia} · ${fechaSQL(l.pagado_en)}</span></article>`)}` : ''}`);
+}
+
 // ---------- administración ----------
-const tabsAdmin = (actual) => html`<div class="tabs"><a href="#/admin/pendiente">Verificaciones</a><a href="#/admin/usuarios" class="${actual === 'usuarios' ? 'activa' : ''}">Usuarios</a><a href="#/admin/resenas" class="${actual === 'resenas' ? 'activa' : ''}">Reseñas</a></div>`;
+const tabsAdmin = (actual) => html`<div class="tabs"><a href="#/admin/pendiente">Verificaciones</a><a href="#/admin/usuarios" class="${actual === 'usuarios' ? 'activa' : ''}">Usuarios</a><a href="#/admin/resenas" class="${actual === 'resenas' ? 'activa' : ''}">Reseñas</a><a href="#/admin/pagos" class="${actual === 'pagos' ? 'activa' : ''}">Pagos a mentores</a><a href="#/admin/devoluciones" class="${actual === 'devoluciones' ? 'activa' : ''}">Devoluciones</a></div>`;
+
+async function vistaAdminPagos(params) {
+  const d = await api('GET', '/api/admin/pagos-mentores' + (params.get('mes') ? '?mes=' + encodeURIComponent(params.get('mes')) : ''));
+  const total = d.mentores.reduce((a, m) => a + (m.liquidacion ? 0 : m.neto), 0);
+  pintar(html`
+    <h1>Administración</h1>${tabsAdmin('pagos')}
+    <form class="filtros" data-form="admin-mes"><label>Mes<input type="month" name="mes" value="${d.mes}"></label><button class="btn">Ver</button></form>
+    <p class="suave">${cap(nombreMes(d.mes))} · comisión ${d.comision_pct}% · ${d.cerrado ? 'mes terminado: puedes pagar' : 'mes en curso: se paga cuando termine'}${total ? html` · <b>Por pagar: ${cop(total)}</b>` : ''}</p>
+    ${d.mentores.length ? d.mentores.map((m) => html`
+      <article class="tarjeta">
+        <h3>${m.nombre} <span class="suave">· ${m.email}</span></h3>
+        <p>${m.n} ${m.n === 1 ? 'clase' : 'clases'} · valor ${cop(m.bruto)} − comisión ${cop(m.comision)} = <b>${cop(m.neto)}</b></p>
+        ${m.cuenta ? html`<p class="suave">${m.cuenta.tipo === 'nequi' || m.cuenta.tipo === 'daviplata' ? m.cuenta.banco : m.cuenta.banco + ' · ' + m.cuenta.tipo}: <b>${m.cuenta.numero}</b> · Titular: ${m.cuenta.titular} · Cédula: ${m.documento || '—'}</p>` : html`<p class="error">Este mentor aún no registró sus datos de pago.</p>`}
+        ${m.liquidacion ? html`<span class="etiqueta ok">Pagado · ${m.liquidacion.referencia}</span>`
+          : d.cerrado && m.cuenta ? html`<button class="btn chico" data-accion="liquidar" data-id="${m.profesor_id}" data-mes="${d.mes}" data-nombre="${m.nombre}" data-neto="${cop(m.neto)}">Registrar pago realizado</button>` : ''}
+      </article>`) : html`<p class="vacio">No hay pagos pendientes a mentores en este mes.</p>`}`, { aviso: false });
+}
+
+async function vistaAdminDevoluciones() {
+  const { devoluciones } = await api('GET', '/api/admin/devoluciones');
+  pintar(html`
+    <h1>Administración</h1>${tabsAdmin('devoluciones')}
+    <p class="suave">Devuelve cada pago desde el panel de Wompi (Transacciones → la transacción → Devolver) y luego márcalo aquí; el estudiante recibe un aviso por correo.</p>
+    ${devoluciones.length ? devoluciones.map((d) => html`
+      <article class="tarjeta">
+        <h3>${d.estudiante} <span class="suave">· ${d.estudiante_email}</span></h3>
+        <p>${d.titulo} · ${d.fecha} ${d.hora} · <b>${cop(d.monto_cop)}</b></p>
+        <p class="suave">Referencia: ${d.pago_ref}${d.transaccion ? ' · Transacción de Wompi: ' + d.transaccion : ''}</p>
+        <button class="btn chico" data-accion="devolucion-hecha" data-id="${d.id}">Ya la devolví</button>
+      </article>`) : html`<p class="vacio">No hay devoluciones pendientes.</p>`}`, { aviso: false });
+}
 
 async function vistaAdminUsuarios(params) {
   const q = params.get('q') ?? '';
@@ -717,12 +792,14 @@ async function vistaAdminResenas() {
 async function vistaAdmin(estado = 'pendiente', params = new URLSearchParams()) {
   if (estado === 'usuarios') return vistaAdminUsuarios(params);
   if (estado === 'resenas') return vistaAdminResenas();
+  if (estado === 'pagos') return vistaAdminPagos(params);
+  if (estado === 'devoluciones') return vistaAdminDevoluciones();
   const { mentores } = await api('GET', `/api/admin/verificaciones?estado=${estado}`);
   const T = { pendiente: 'Pendientes', verificado: 'Verificados', rechazado: 'Rechazados' };
   const NOMBRE_DOC = { cedula: 'Cédula', titulo: 'Título / certificado' };
   pintar(html`
     <h1>Verificación de mentores</h1>
-    <div class="tabs">${Object.entries(T).map(([k, v]) => html`<a href="#/admin/${k}" class="${k === estado ? 'activa' : ''}">${v}</a>`)}<a href="#/admin/usuarios">Usuarios</a><a href="#/admin/resenas">Reseñas</a></div>
+    <div class="tabs">${Object.entries(T).map(([k, v]) => html`<a href="#/admin/${k}" class="${k === estado ? 'activa' : ''}">${v}</a>`)}<a href="#/admin/usuarios">Usuarios</a><a href="#/admin/resenas">Reseñas</a><a href="#/admin/pagos">Pagos a mentores</a><a href="#/admin/devoluciones">Devoluciones</a></div>
     ${mentores.length ? mentores.map((m) => html`
       <article class="tarjeta">
         <h3>${m.nombre}</h3>
@@ -789,10 +866,11 @@ async function enrutar() {
   const [rutaTxt, qs] = (location.hash.slice(1) || '/').split('?');
   const params = new URLSearchParams(qs ?? '');
   const [, base, arg] = rutaTxt.split('/');
-  const protegidas = ['empezar', 'perfil', 'suscripcion', 'verificacion', 'mis-clases', 'horarios', 'agenda', 'solicitudes', 'reservas', 'admin'];
+  const protegidas = ['empezar', 'perfil', 'suscripcion', 'ganancias', 'verificacion', 'mis-clases', 'horarios', 'agenda', 'solicitudes', 'reservas', 'admin'];
   try {
     if (protegidas.includes(base) && !yo) { location.hash = '#/ingresar'; return; }
-    if (['mis-clases', 'horarios', 'verificacion'].includes(base) && yo.rol !== 'profesor') { location.hash = '#/'; return; }
+    if (['mis-clases', 'horarios', 'verificacion', 'ganancias'].includes(base) && yo.rol !== 'profesor') { location.hash = '#/'; return; }
+    if (base === 'suscripcion' && yo.rol === 'profesor') { location.hash = '#/ganancias'; return; }
     if (base === 'admin' && !yo.es_admin) { location.hash = '#/'; return; }
     pintarNav();
     switch (base) {
@@ -808,11 +886,12 @@ async function enrutar() {
       case 'privacidad': vistaLegal(privacidad(datosEmpresa(catalogo.empresa)), ['terminos', 'Términos y Condiciones']); break;
       case 'perfil': vistaPerfil(); break;
       case 'suscripcion': await vistaSuscripcion(params); break;
+      case 'ganancias': await vistaGanancias(); break;
       case 'verificacion': await vistaVerificacion(params); break;
       case 'mis-clases': await vistaMisClases(arg); break;
       case 'horarios': await vistaHorarios(); break;
       case 'solicitudes': await vistaSolicitudes(); break;
-      case 'agenda': case 'reservas': await vistaAgenda(); break;
+      case 'agenda': case 'reservas': await vistaAgenda(params); break;
       case 'admin': await vistaAdmin(arg, params); break;
       default: pintar(html`<p class="vacio">Página no encontrada. <a href="#/">Ir al inicio</a></p>`, { aviso: false });
     }
@@ -839,6 +918,7 @@ document.addEventListener('submit', async (ev) => {
         if (location.hash === destino) await enrutar(); else location.hash = destino;
         break;
       }
+      case 'admin-mes': location.hash = '#/admin/pagos?mes=' + encodeURIComponent(d.mes); break;
       case 'admin-buscar': { const p = new URLSearchParams(Object.entries(d).filter(([, v]) => v)); location.hash = '#/admin/usuarios' + (p.size ? '?' + p : ''); break; }
       case 'registro': case 'ingresar': {
         const reg = f.dataset.form === 'registro';
@@ -867,9 +947,11 @@ document.addEventListener('submit', async (ev) => {
         avisar('Horarios guardados'); break;
       case 'reservar': {
         const [fecha, hora] = d.slot.split('|');
-        await api('POST', '/api/reservas', { clase_id: Number(f.dataset.id), fecha, hora, mensaje: d.mensaje });
-        avisar('Solicitud enviada al mentor'); location.hash = '#/agenda'; break;
+        const r = await api('POST', '/api/reservas', { clase_id: Number(f.dataset.id), fecha, hora, mensaje: d.mensaje });
+        await pagarClase(r.pago); break;
       }
+      case 'cuenta':
+        await api('PUT', '/api/cuenta-cobro', d); await refrescarYo(); pintarNav(); avisar('Datos guardados'); await enrutar(); break;
       case 'resena':
         await api('POST', '/api/resenas', { reserva_id: Number(f.dataset.id), calificacion: Number(d.calificacion), comentario: d.comentario });
         avisar('¡Gracias por tu reseña!'); await enrutar(); break;
@@ -916,8 +998,15 @@ document.addEventListener('click', async (ev) => {
     if (accion === 'borrar-clase' && confirm('¿Eliminar esta clase?')) { await api('DELETE', `/api/clases/${id}`); await enrutar(); }
     if (accion === 'borrar-solicitud' && confirm('¿Eliminar esta solicitud?')) { await api('DELETE', `/api/solicitudes/${id}`); await enrutar(); }
     if (accion === 'reserva') {
-      if (estado === 'cancelada' && !confirm('¿Cancelar esta clase?')) return;
+      if (estado === 'cancelada' && !confirm(b.dataset.sinDevolucion ? 'Faltan menos de 24 horas para la clase: si la cancelas no habrá devolución del pago. ¿Cancelar de todos modos?' : '¿Cancelar esta clase?')) return;
       await api('PUT', `/api/reservas/${id}`, { estado }); await enrutar();
+    }
+    if (accion === 'pagar-reserva') { b.disabled = true; const r = await api('POST', `/api/reservas/${id}/pagar`); await pagarClase(r); return; }
+    if (accion === 'devolucion-hecha' && confirm('¿Ya devolviste este pago desde el panel de Wompi?')) { await api('POST', `/api/admin/devoluciones/${id}`); avisar('Devolución marcada'); await enrutar(); return; }
+    if (accion === 'liquidar') {
+      const referencia = prompt(`Escribe la referencia de la transferencia a ${b.dataset.nombre} (por ${b.dataset.neto}):`);
+      if (!referencia) return;
+      await api('POST', '/api/admin/liquidaciones', { profesor_id: Number(id), mes: b.dataset.mes, referencia }); avisar('Pago registrado'); await enrutar(); return;
     }
     if (accion === 'agregar-bloque') { leerBloques(); bloques.push({ dia: Number(dia), inicio: '14:00', fin: '18:00' }); pintarHorarios(); }
     if (accion === 'quitar-bloque') { leerBloques(); bloques.splice(Number(i), 1); pintarHorarios(); }

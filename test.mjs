@@ -46,6 +46,13 @@ const pagarSimulado = async (c) => {
   assert.equal(r.datos.suscripcion.activa, true);
 };
 
+/** Reserva y paga la clase con el simulador; devuelve la respuesta de la reserva (o el error si no se pudo reservar). */
+async function reservar(c, cuerpo) {
+  const r = await c('POST', '/api/reservas', cuerpo);
+  if (r.estado === 201 && r.datos.pago?.pago_id) await c('POST', '/api/pagos/simular', { pago_id: r.datos.pago.pago_id });
+  return r;
+}
+
 /** Crea un mentor verificado y suscrito con una clase y disponibilidad todos los días 08:00-12:00. */
 async function mentorListo(app, nombre = 'Laura', extraClase = {}) {
   const m = app.cliente();
@@ -56,7 +63,6 @@ async function mentorListo(app, nombre = 'Laura', extraClase = {}) {
   await m('POST', '/api/verificacion/enviar');
   const id = (await m('GET', '/api/yo')).datos.usuario.id;
   app.db.prepare(`UPDATE usuarios SET verificacion_estado='verificado' WHERE id=?`).run(id);
-  await pagarSimulado(m);
   const clase = (await m('POST', '/api/clases', { titulo: 'Álgebra', materia: 'Matemáticas', precio_hora: 40000, modalidad: 'virtual', duracion_min: 60, ...extraClase })).datos.clase;
   await m('PUT', '/api/horarios', { horarios: [0, 1, 2, 3, 4, 5, 6].map((dia) => ({ dia, inicio: '08:00', fin: '12:00' })) });
   return { m, id, clase };
@@ -124,7 +130,6 @@ test('verificación del mentor: documentos, revisión del administrador y visibi
   await registrar(m, 'profesor', 'Pedro');
   await m('PUT', '/api/perfil', { nombre: 'Pedro', ciudad: 'Bogotá D.C.', materias: 'Química' });
   await m('POST', '/api/clases', { titulo: 'Química', materia: 'Química', precio_hora: 30000, modalidad: 'virtual' });
-  await pagarSimulado(m);
 
   assert.equal((await m('GET', '/api/clases')).datos.clases.length, 0, 'sin verificar no aparece');
   assert.equal((await m('POST', '/api/verificacion/enviar')).estado, 400, 'falta la cédula');
@@ -169,17 +174,20 @@ test('verificación del mentor: documentos, revisión del administrador y visibi
   assert.equal(vis[0].verificado, 1);
 });
 
-test('una clase solo es pública con mentor verificado y suscripción activa', async (t) => {
+test('una clase es pública con mentor verificado; el mentor no paga suscripción', async (t) => {
   const app = await iniciar(); t.after(app.cerrar);
   const { m, id, clase } = await mentorListo(app);
   const e = await estudianteListo(app);
   assert.equal((await e('GET', '/api/clases')).datos.clases.length, 1);
-  app.db.prepare(`UPDATE suscripciones SET vence = '2000-01-01 00:00:00' WHERE usuario_id = ?`).run(id);
-  assert.equal((await e('GET', '/api/clases')).datos.clases.length, 0, 'suscripción vencida');
+  const yo = (await m('GET', '/api/yo')).datos.usuario;
+  assert.equal(yo.suscripcion.activa, true);
+  assert.equal(yo.suscripcion.precio, 0);
+  assert.equal((await m('POST', '/api/pagos/iniciar')).estado, 403, 'el mentor no paga suscripción');
+  app.db.prepare(`UPDATE usuarios SET verificacion_estado = 'rechazado' WHERE id = ?`).run(id);
+  assert.equal((await e('GET', '/api/clases')).datos.clases.length, 0, 'sin verificación no se ve');
   assert.equal((await e('GET', `/api/clases/${clase.id}`)).estado, 404);
-  assert.equal((await m('GET', '/api/clases/mias')).datos.clases[0].oculta_por, 'Suscripción inactiva');
+  assert.equal((await m('GET', '/api/clases/mias')).datos.clases[0].oculta_por, 'Pendiente de verificación');
   assert.equal((await m('GET', `/api/clases/${clase.id}`)).estado, 200, 'el dueño la sigue viendo');
-  assert.equal((await e('GET', `/api/profesores/${id}`)).datos.clases.length, 0);
 });
 
 test('suscripción con Wompi: checkout firmado, retorno verificado y webhook idempotente', async (t) => {
@@ -250,7 +258,7 @@ test('pagos no configurados y precios por rol', async (t) => {
   assert.equal((await e('POST', '/api/pagos/iniciar')).estado, 503);
   assert.equal((await e('POST', '/api/wompi/eventos', {})).estado, 503);
   const m = app.cliente(); await registrar(m, 'profesor', 'Luis');
-  assert.equal((await m('GET', '/api/yo')).datos.usuario.suscripcion.precio, 49900);
+  assert.equal((await m('GET', '/api/yo')).datos.usuario.suscripcion.precio, 0, 'el mentor no paga suscripción');
   assert.equal((await e('GET', '/api/yo')).datos.usuario.suscripcion.precio, 19900);
   assert.equal((await app.cliente()('GET', '/api/suscripcion')).estado, 401);
 });
@@ -276,17 +284,17 @@ test('agenda: horarios, reserva por horario, choques y contacto', async (t) => {
   assert.ok(disp.dias.every((d) => d.fecha >= hoyCol()));
 
   // reservar
-  assert.equal((await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '08:30' })).estado, 409, 'hora fuera de la cuadrícula');
-  assert.equal((await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: sumarDias(hoyCol(), -1), hora: '09:00' })).estado, 400, 'fecha pasada');
-  assert.equal((await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: 'x' })).estado, 400);
-  const r = await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00', mensaje: 'Hola' });
+  assert.equal((await reservar(sofia, { clase_id: clase.id, fecha: manana, hora: '08:30' })).estado, 409, 'hora fuera de la cuadrícula');
+  assert.equal((await reservar(sofia, { clase_id: clase.id, fecha: sumarDias(hoyCol(), -1), hora: '09:00' })).estado, 400, 'fecha pasada');
+  assert.equal((await reservar(sofia, { clase_id: clase.id, fecha: manana, hora: 'x' })).estado, 400);
+  const r = await reservar(sofia, { clase_id: clase.id, fecha: manana, hora: '09:00', mensaje: 'Hola' });
   assert.equal(r.estado, 201);
   const reservaId = r.datos.reserva.id;
   const otra = await estudianteListo(app, 'Otra');
-  assert.equal((await otra('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' })).estado, 409, 'horario ocupado');
+  assert.equal((await reservar(otra, { clase_id: clase.id, fecha: manana, hora: '09:00' })).estado, 409, 'horario ocupado');
   const libres = (await otra('GET', `/api/clases/${clase.id}/disponibilidad`)).datos.dias.find((d) => d.fecha === manana).horas;
   assert.deepEqual(libres, ['08:00', '10:00', '11:00'], 'el horario reservado ya no aparece');
-  assert.equal((await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' })).estado, 409);
+  assert.equal((await reservar(sofia, { clase_id: clase.id, fecha: manana, hora: '09:00' })).estado, 409);
 
   // privacidad del contacto
   let lista = (await m('GET', '/api/reservas')).datos.reservas[0];
@@ -304,31 +312,29 @@ test('agenda: horarios, reserva por horario, choques y contacto', async (t) => {
   // cancelar libera el horario
   assert.equal((await sofia('PUT', `/api/reservas/${reservaId}`, { estado: 'cancelada' })).estado, 200);
   assert.ok((await otra('GET', `/api/clases/${clase.id}/disponibilidad`)).datos.dias.find((d) => d.fecha === manana).horas.includes('09:00'));
-  assert.equal((await otra('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' })).estado, 201);
-  assert.equal((await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' })).estado, 409);
+  assert.equal((await reservar(otra, { clase_id: clase.id, fecha: manana, hora: '09:00' })).estado, 201);
+  assert.equal((await reservar(sofia, { clase_id: clase.id, fecha: manana, hora: '09:00' })).estado, 409);
 
   // un mentor no reserva; un estudiante sin cuenta tampoco
-  assert.equal((await m('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '10:00' })).estado, 403);
+  assert.equal((await reservar(m, { clase_id: clase.id, fecha: manana, hora: '10:00' })).estado, 403);
   assert.equal((await app.cliente()('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '10:00' })).estado, 401);
 });
 
-test('reservar exige suscripción y perfil de colegio completo; el mentor exige suscripción para aceptar', async (t) => {
+test('reservar exige suscripción y perfil de colegio completo; no se acepta lo que no está pagado', async (t) => {
   const app = await iniciar(); t.after(app.cerrar);
   const { m, id, clase } = await mentorListo(app);
   const manana = sumarDias(hoyCol(), 1);
   const e = app.cliente();
   await registrar(e, 'estudiante', 'Luna', { colegio_tipo: 'privado', es_menor: true });
-  let r = await e('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' });
+  let r = await reservar(e, { clase_id: clase.id, fecha: manana, hora: '09:00' });
   assert.equal(r.estado, 402, 'sin suscripción');
   await pagarSimulado(e);
-  r = await e('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' });
+  r = await reservar(e, { clase_id: clase.id, fecha: manana, hora: '09:00' });
   assert.equal(r.estado, 409);
   assert.match(r.datos.error, /ciudad/);
   await e('PUT', '/api/perfil', { nombre: 'Luna', ciudad: 'Bogotá D.C.', colegio_tipo: 'privado', colegio_nombre: 'Colegio Y', es_menor: true, acudiente_nombre: 'Rosa', acudiente_celular: '3001112222' });
-  r = await e('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' });
+  r = await reservar(e, { clase_id: clase.id, fecha: manana, hora: '09:00' });
   assert.equal(r.estado, 201);
-  app.db.prepare(`UPDATE suscripciones SET vence = '2000-01-01 00:00:00' WHERE usuario_id = ?`).run(id);
-  assert.equal((await m('PUT', `/api/reservas/${r.datos.reserva.id}`, { estado: 'aceptada' })).estado, 402);
   assert.equal((await m('PUT', `/api/reservas/${r.datos.reserva.id}`, { estado: 'rechazada' })).estado, 200, 'rechazar siempre se puede');
 });
 
@@ -341,7 +347,7 @@ test('reseñas: solo tras la clase, una vez, y alimentan el perfil del mentor', 
   const did = (await dani('GET', '/api/yo')).datos.usuario.id;
 
   const manana = sumarDias(hoyCol(), 1);
-  const futura = (await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' })).datos.reserva.id;
+  const futura = (await reservar(sofia, { clase_id: clase.id, fecha: manana, hora: '09:00' })).datos.reserva.id;
   await m('PUT', `/api/reservas/${futura}`, { estado: 'aceptada' });
   assert.equal((await sofia('POST', '/api/resenas', { reserva_id: futura, calificacion: 5 })).estado, 409, 'la clase aún no ocurre');
   assert.equal((await sofia('GET', '/api/reservas')).datos.reservas[0].puede_resenar, false);
@@ -473,8 +479,8 @@ test('primeros pasos y precios por defecto', async (t) => {
 
   const m = app.cliente(); await registrar(m, 'profesor', 'Luis');
   u = (await m('GET', '/api/yo')).datos.usuario;
-  assert.equal(u.suscripcion.precio, 59900, 'mentor: $59.900 al mes');
-  assert.deepEqual(u.pasos.map((p) => p.id), ['perfil', 'verificacion', 'suscripcion', 'clase', 'horarios']);
+  assert.equal(u.suscripcion.precio, 0, 'mentor: sin suscripción');
+  assert.deepEqual(u.pasos.map((p) => p.id), ['perfil', 'verificacion', 'cobros', 'clase', 'horarios']);
   assert.ok(u.pasos.every((p) => !p.ok));
 });
 
@@ -1000,7 +1006,7 @@ test('eliminar mi cuenta: datos personales fuera, pagos conservados, clases y re
   const { m, id, clase } = await mentorListo(app, 'Laura');
   const e = await estudianteListo(app);
   const manana = sumarDias(hoyCol(), 1);
-  const reserva = (await e('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' })).datos.reserva.id;
+  const reserva = (await reservar(e, { clase_id: clase.id, fecha: manana, hora: '09:00' })).datos.reserva.id;
   await e('POST', '/api/solicitudes', { materia: 'Física', modalidad: 'virtual' });
 
   assert.equal((await m('POST', '/api/cuenta/eliminar', { password: 'incorrecta' })).estado, 400);
@@ -1013,8 +1019,11 @@ test('eliminar mi cuenta: datos personales fuera, pagos conservados, clases y re
   for (const campo of ['telefono', 'bio', 'materias', 'experiencia', 'documento', 'ciudad']) assert.equal(fila[campo], '', campo);
   assert.equal(app.db.prepare('SELECT COUNT(*) n FROM documentos WHERE usuario_id = ?').get(id).n, 0, 'documentos borrados');
   assert.equal(app.db.prepare('SELECT COUNT(*) n FROM horarios WHERE profesor_id = ?').get(id).n, 0);
-  assert.ok(app.db.prepare('SELECT COUNT(*) n FROM pagos WHERE usuario_id = ?').get(id).n >= 1, 'los pagos se conservan');
-  assert.equal(app.db.prepare('SELECT estado FROM reservas WHERE id = ?').get(reserva).estado, 'cancelada', 'las reservas futuras se cancelan');
+  const sidE = (await e('GET', '/api/yo')).datos.usuario.id;
+  assert.ok(app.db.prepare('SELECT COUNT(*) n FROM pagos WHERE usuario_id = ?').get(sidE).n >= 1, 'los pagos se conservan');
+  const rf = app.db.prepare('SELECT estado, pago_estado FROM reservas WHERE id = ?').get(reserva);
+  assert.equal(rf.estado, 'cancelada', 'las reservas futuras se cancelan');
+  assert.equal(rf.pago_estado, 'reembolso_pendiente', 'y lo pagado se devuelve');
   assert.equal((await e('GET', '/api/clases')).datos.clases.length, 0);
   assert.equal((await m('GET', '/api/yo')).datos.usuario, null);
   assert.equal((await app.cliente()('POST', '/api/login', { email: 'laura@x.co', password: 'clave12345' })).estado, 401, 'el correo queda libre');
@@ -1078,7 +1087,7 @@ test('calendario: .ics por reserva, enlace de suscripción privado y aviso de cl
   const sofia = await estudianteListo(app, 'Sofia');
   const dani = await estudianteListo(app, 'Dani');
   const manana = sumarDias(hoyCol(), 1);
-  const rid = (await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00' })).datos.reserva.id;
+  const rid = (await reservar(sofia, { clase_id: clase.id, fecha: manana, hora: '09:00' })).datos.reserva.id;
 
   // .ics de una reserva: solo para sus participantes; 09:00 en Bogotá = 14:00 UTC
   let r = await sofia('GET', `/api/reservas/${rid}/ics`);
@@ -1131,7 +1140,7 @@ test('correos con Resend: reservas, ofertas, recordatorio y petición de reseña
   const para = (x) => enviados.filter((e) => e.para === x);
 
   const manana = sumarDias(hoyCol(), 1);
-  const rid = (await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:00', mensaje: '<b>Hola</b>' })).datos.reserva.id;
+  const rid = (await reservar(sofia, { clase_id: clase.id, fecha: manana, hora: '09:00', mensaje: '<b>Hola</b>' })).datos.reserva.id;
   assert.equal(para('laura@x.co').length, 1, 'el mentor recibe la nueva solicitud');
   assert.match(para('laura@x.co')[0].asunto, /Nueva solicitud/);
   assert.match(para('laura@x.co')[0].parrafos.join(' '), /Sofia/);
@@ -1175,7 +1184,7 @@ test('correos desactivados: sin clave no se envía nada y la app funciona igual'
   const app = await iniciar(); t.after(app.cerrar);
   const { clase } = await mentorListo(app);
   const sofia = await estudianteListo(app, 'Sofia');
-  const r = await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: sumarDias(hoyCol(), 1), hora: '09:00' });
+  const r = await reservar(sofia, { clase_id: clase.id, fecha: sumarDias(hoyCol(), 1), hora: '09:00' });
   assert.equal(r.estado, 201);
   app.avisos();
 });
@@ -1194,4 +1203,129 @@ test('Resend: petición correcta, HTML escapado y errores sin romper', async () 
   const falla = crearCorreo({ apiKey: 're_x', remitente: 'a@d.co', baseUrl: 'https://artia.test', log: { error() {} }, fetchFn: async () => ({ ok: false, status: 403, text: async () => 'no' }) });
   assert.equal(await falla.enviar({ para: 'p@x.co', asunto: 'x', parrafos: ['x'] }), false);
   assert.equal(await crearCorreo({}).enviar({ para: 'p@x.co', asunto: 'x', parrafos: ['x'] }), false, 'sin clave no envía');
+});
+
+test('cobro de clases: pago al reservar, el mentor solo ve lo pagado, comisión del 15%, devoluciones y liquidación mensual', async (t) => {
+  const app = await iniciar({ adminEmails: ['admin@x.co'] }); t.after(app.cerrar);
+  const admin = await conAdmin(app);
+  const { m, id, clase } = await mentorListo(app, 'Laura', { precio_hora: 40000, duracion_min: 90 });
+  const sofia = await estudianteListo(app, 'Sofia');
+  const manana = sumarDias(hoyCol(), 1), lejos = sumarDias(hoyCol(), 5);
+
+  // reservar crea un pago por el valor de la clase (40.000 × 1,5 h = 60.000) y la comisión del 15%
+  let r = await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: manana, hora: '09:30' });
+  assert.equal(r.estado, 201);
+  assert.equal(r.datos.pago.monto, 60000);
+  const rid = r.datos.reserva.id;
+  let fila = app.db.prepare('SELECT * FROM reservas WHERE id = ?').get(rid);
+  assert.deepEqual([fila.pago_estado, fila.monto_cop, fila.comision_cop], ['por_pagar', 60000, 9000]);
+  assert.equal((await m('GET', '/api/reservas')).datos.reservas.length, 0, 'el mentor no ve reservas sin pagar');
+  assert.equal((await m('PUT', `/api/reservas/${rid}`, { estado: 'aceptada' })).estado, 409);
+  // el horario queda guardado mientras se paga
+  assert.ok(!(await sofia('GET', `/api/clases/${clase.id}/disponibilidad`)).datos.dias.find((d) => d.fecha === manana).horas.includes('09:30'));
+
+  // pagar → el mentor la ve con su neto (51.000)
+  assert.equal((await sofia('POST', '/api/pagos/simular', { pago_id: r.datos.pago.pago_id })).estado, 200);
+  const vista = (await m('GET', '/api/reservas')).datos.reservas[0];
+  assert.deepEqual([vista.pago_estado, vista.monto_cop, vista.comision_cop, vista.neto_cop], ['pagado', 60000, 9000, 51000]);
+  assert.equal((await m('PUT', `/api/reservas/${rid}`, { estado: 'aceptada' })).estado, 200);
+
+  // cancelar con más de 24 h de anticipación → devolución pendiente
+  assert.equal((await sofia('PUT', `/api/reservas/${rid}`, { estado: 'cancelada' })).estado, 200);
+  assert.equal(app.db.prepare('SELECT pago_estado FROM reservas WHERE id = ?').get(rid).pago_estado, 'reembolso_pendiente');
+  const dev = (await admin('GET', '/api/admin/devoluciones')).datos.devoluciones;
+  assert.equal(dev.length, 1);
+  assert.equal(dev[0].monto_cop, 60000);
+  assert.equal((await sofia('GET', '/api/admin/devoluciones')).estado, 403);
+  assert.equal((await admin('POST', `/api/admin/devoluciones/${rid}`)).estado, 200);
+  assert.equal((await admin('POST', `/api/admin/devoluciones/${rid}`)).estado, 404, 'una sola vez');
+  assert.equal(app.db.prepare('SELECT pago_estado FROM reservas WHERE id = ?').get(rid).pago_estado, 'reembolsado');
+
+  // el mentor rechaza → devolución; sin respuesta antes de la clase → se cancela y se devuelve
+  r = await reservar(sofia, { clase_id: clase.id, fecha: lejos, hora: '08:00' });
+  await m('PUT', `/api/reservas/${r.datos.reserva.id}`, { estado: 'rechazada' });
+  assert.equal(app.db.prepare('SELECT pago_estado FROM reservas WHERE id = ?').get(r.datos.reserva.id).pago_estado, 'reembolso_pendiente');
+  const sid = (await sofia('GET', '/api/yo')).datos.usuario.id;
+  const ins = app.db.prepare(`INSERT INTO reservas (clase_id, profesor_id, estudiante_id, fecha, hora, duracion_min, estado, pago_estado, monto_cop, comision_cop) VALUES (?,?,?,?,?,60,?,'pagado',40000,6000)`);
+  const sinResp = Number(ins.run(clase.id, id, sid, sumarDias(hoyCol(), -1), '09:00', 'pendiente').lastInsertRowid);
+  app.avisos();
+  assert.deepEqual(Object.values(app.db.prepare('SELECT estado, pago_estado FROM reservas WHERE id = ?').get(sinResp)), ['cancelada', 'reembolso_pendiente']);
+
+  // cancelación tardía de una clase aceptada (< 24 h): sin devolución y el mentor cobra su parte
+  const en3h = new Date(Date.now() - 5 * 3600 * 1000 + 3 * 3600 * 1000);
+  const tarde = Number(ins.run(clase.id, id, sid, en3h.toISOString().slice(0, 10), en3h.toISOString().slice(11, 16), 'aceptada').lastInsertRowid);
+  assert.equal((await sofia('PUT', `/api/reservas/${tarde}`, { estado: 'cancelada' })).estado, 200);
+  assert.equal(app.db.prepare('SELECT pago_estado FROM reservas WHERE id = ?').get(tarde).pago_estado, 'pagado');
+
+  // reserva sin pagar que expira libera el horario
+  r = await sofia('POST', '/api/reservas', { clase_id: clase.id, fecha: lejos, hora: '09:30' });
+  app.db.prepare(`UPDATE reservas SET creado = datetime('now', '-31 minutes') WHERE id = ?`).run(r.datos.reserva.id);
+  app.avisos();
+  assert.equal(app.db.prepare('SELECT estado FROM reservas WHERE id = ?').get(r.datos.reserva.id).estado, 'cancelada');
+  assert.ok((await sofia('GET', `/api/clases/${clase.id}/disponibilidad`)).datos.dias.find((d) => d.fecha === lejos).horas.includes('09:30'));
+
+  // ganancias del mentor y liquidación mensual del mes pasado
+  const mesPasado = sumarDias(hoyCol().slice(0, 7) + '-01', -1).slice(0, 7);
+  const clases = [['aceptada', 60000, 9000], ['aceptada', 40000, 6000]].map(([est, mon, com], i) =>
+    Number(app.db.prepare(`INSERT INTO reservas (clase_id, profesor_id, estudiante_id, fecha, hora, duracion_min, estado, pago_estado, monto_cop, comision_cop) VALUES (?,?,?,?,?,60,?,'pagado',?,?)`)
+      .run(clase.id, id, sid, `${mesPasado}-1${i}`, '09:00', est, mon, com).lastInsertRowid));
+  let g = (await m('GET', '/api/ganancias')).datos;
+  assert.equal(g.comision_pct, 15);
+  const delMes = g.por_liquidar.find((x) => x.mes === mesPasado);
+  assert.deepEqual([delMes.n, delMes.bruto, delMes.comision, delMes.neto], [2, 100000, 15000, 85000]);
+  assert.equal((await m('PUT', '/api/cuenta-cobro', { tipo: 'ahorros', banco: 'Bancolombia', numero: '123', titular: 'Laura' })).estado, 400, 'cuenta inválida');
+  assert.equal((await m('PUT', '/api/cuenta-cobro', { tipo: 'ahorros', banco: 'Bancolombia', numero: '123-456-7890', titular: 'Laura Pérez' })).estado, 200);
+
+  const lista = (await admin('GET', `/api/admin/pagos-mentores?mes=${mesPasado}`)).datos;
+  assert.equal(lista.cerrado, true);
+  const fm = lista.mentores.find((x) => x.profesor_id === id);
+  assert.deepEqual([fm.n, fm.bruto, fm.comision, fm.neto, fm.cuenta.numero], [2, 100000, 15000, 85000, '1234567890']);
+  assert.equal((await m('POST', '/api/admin/liquidaciones', { profesor_id: id, mes: mesPasado, referencia: 'x' })).estado, 403);
+  assert.equal((await admin('POST', '/api/admin/liquidaciones', { profesor_id: id, mes: hoyCol().slice(0, 7), referencia: 'x' })).estado, 409, 'el mes en curso no se liquida');
+  assert.equal((await admin('POST', '/api/admin/liquidaciones', { profesor_id: id, mes: mesPasado })).estado, 400, 'falta la referencia');
+  assert.equal((await admin('POST', '/api/admin/liquidaciones', { profesor_id: id, mes: mesPasado, referencia: 'TRX-001' })).estado, 201);
+  assert.equal((await admin('POST', '/api/admin/liquidaciones', { profesor_id: id, mes: mesPasado, referencia: 'TRX-002' })).estado, 409, 'una sola vez');
+  g = (await m('GET', '/api/ganancias')).datos;
+  assert.equal(g.por_liquidar.find((x) => x.mes === mesPasado), undefined);
+  assert.deepEqual([g.liquidaciones[0].mes, g.liquidaciones[0].neto_cop, g.liquidaciones[0].referencia], [mesPasado, 85000, 'TRX-001']);
+  assert.ok(clases.every((c) => app.db.prepare('SELECT liquidacion_id FROM reservas WHERE id = ?').get(c).liquidacion_id), 'las clases quedan marcadas como liquidadas');
+});
+
+test('cobro de clases con Wompi: el pago aprobado por webhook libera la reserva al mentor; uno fallido libera el horario', async (t) => {
+  const wompi = { publicKey: 'pub_test_abc', integritySecret: 'integ', eventsSecret: 'ev' };
+  const app = await iniciar({ wompi, pagosSimulados: false, baseUrl: 'https://artia.test' }); t.after(app.cerrar);
+  const { m, clase } = await mentorListo(app);
+  const e = app.cliente();
+  await registrar(e, 'estudiante', 'Sofia', { colegio_tipo: 'privado' });
+  await e('PUT', '/api/perfil', { nombre: 'Sofia', ciudad: 'Bogotá D.C.', telefono: '3205550202', colegio_tipo: 'privado', colegio_nombre: 'Colegio X', localidad: 'Usaquén', grado: '11°' });
+  app.db.prepare(`INSERT INTO suscripciones (usuario_id, vence) VALUES (?, datetime('now', '+10 days'))`).run((await e('GET', '/api/yo')).datos.usuario.id);
+  const evento = (ref, status, centavos) => { const ev = { event: 'transaction.updated', timestamp: 1700000000, data: { transaction: { reference: ref, status, amount_in_cents: centavos, id: 'tx-1' } }, signature: { properties: ['transaction.status'], checksum: '' } }; ev.signature.checksum = checksumEvento(ev, 'ev'); return ev; };
+
+  const r = await e('POST', '/api/reservas', { clase_id: clase.id, fecha: sumarDias(hoyCol(), 1), hora: '09:00' });
+  assert.equal(r.estado, 201);
+  const url = new URL(r.datos.pago.url);
+  assert.equal(url.searchParams.get('amount-in-cents'), '4000000');
+  const ref = url.searchParams.get('reference');
+  assert.match(ref, /^CLASE-/);
+  assert.equal(url.searchParams.get('signature:integrity'), firmaIntegridad(ref, 4000000, 'COP', 'integ'));
+  assert.equal((await app.cliente()('POST', '/api/wompi/eventos', evento(ref, 'APPROVED', 1))).datos.ok, true, 'el monto no coincide: se ignora');
+  assert.equal(app.db.prepare('SELECT pago_estado FROM reservas WHERE id = ?').get(r.datos.reserva.id).pago_estado, 'por_pagar');
+  await app.cliente()('POST', '/api/wompi/eventos', evento(ref, 'APPROVED', 4000000));
+  assert.equal(app.db.prepare('SELECT pago_estado FROM reservas WHERE id = ?').get(r.datos.reserva.id).pago_estado, 'pagado');
+  assert.equal((await m('GET', '/api/reservas')).datos.reservas.length, 1);
+  await app.cliente()('POST', '/api/wompi/eventos', evento(ref, 'APPROVED', 4000000)); // idempotente
+  assert.equal(app.db.prepare(`SELECT COUNT(*) n FROM suscripciones`).get().n, 1, 'un pago de clase no extiende la suscripción');
+
+  const r2 = await e('POST', '/api/reservas', { clase_id: clase.id, fecha: sumarDias(hoyCol(), 2), hora: '09:00' });
+  const ref2 = new URL(r2.datos.pago.url).searchParams.get('reference');
+  await app.cliente()('POST', '/api/wompi/eventos', evento(ref2, 'DECLINED', 4000000));
+  assert.equal(app.db.prepare('SELECT estado FROM reservas WHERE id = ?').get(r2.datos.reserva.id).estado, 'cancelada', 'pago fallido: se libera el horario');
+
+  // aprobado tarde (la reserva ya había expirado): se marca para devolución
+  const r3 = await e('POST', '/api/reservas', { clase_id: clase.id, fecha: sumarDias(hoyCol(), 3), hora: '09:00' });
+  const ref3 = new URL(r3.datos.pago.url).searchParams.get('reference');
+  app.db.prepare(`UPDATE reservas SET creado = datetime('now', '-40 minutes') WHERE id = ?`).run(r3.datos.reserva.id);
+  app.avisos();
+  await app.cliente()('POST', '/api/wompi/eventos', evento(ref3, 'APPROVED', 4000000));
+  assert.equal(app.db.prepare('SELECT pago_estado FROM reservas WHERE id = ?').get(r3.datos.reserva.id).pago_estado, 'reembolso_pendiente');
 });

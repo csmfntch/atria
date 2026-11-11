@@ -2,11 +2,13 @@
 import {
   falla, json, texto, entero, HORA_RE, FECHA_RE, aMinutos, aHHMM, hoyCol, minutosAhoraCol, sumarDias, diaSemana,
 } from './helpers.mjs';
+import { crearPagoClase, montos, HORAS_CANCELACION } from './cobros.mjs';
 
 const ANTICIPACION_MIN = 120; // no se puede reservar con menos de 2 horas de anticipación
 const MAX_DIAS = 30;
 
-export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, exigirSuscripcion, perfilEstudianteFalta, notificar }) {
+export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, exigirSuscripcion, perfilEstudianteFalta, notificar, ...ctxRest }) {
+  const ctx = { q, db, ...ctxRest, notificar };
   /** ¿Ya terminó la clase? (hora de Colombia) */
   const terminada = (fecha, hora, dur) => {
     const hoy = hoyCol();
@@ -107,8 +109,13 @@ export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, ex
       id = Number(q('INSERT INTO reservas (clase_id, profesor_id, estudiante_id, fecha, hora, duracion_min, mensaje) VALUES (?,?,?,?,?,?,?)')
         .run(clase.id, clase.profesor_id, usuario.id, fecha, hora, clase.duracion_min, texto(body.mensaje, 500)).lastInsertRowid);
     } catch { falla(409, 'Ese horario acaba de ser reservado. Elige otro.'); }
-    notificar.reservaNueva(id);
-    return json(201, { reserva: { id, estado: 'pendiente', fecha, hora } });
+    // El estudiante paga la clase a Artia al reservar; el mentor la ve cuando el pago se confirma.
+    const { monto, comision } = montos(clase.precio_hora, clase.duracion_min, ctx.config.comisionPct);
+    q('UPDATE reservas SET monto_cop = ?, comision_cop = ? WHERE id = ?').run(monto, comision, id);
+    let pago;
+    try { pago = crearPagoClase(ctx, usuario, id, monto); }
+    catch (e) { q(`UPDATE reservas SET estado = 'cancelada' WHERE id = ?`).run(id); throw e; }
+    return json(201, { reserva: { id, estado: 'pendiente', fecha, hora, monto_cop: monto }, pago });
   });
 
   ruta('GET', '/api/reservas', ({ usuario }) => {
@@ -122,7 +129,7 @@ export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, ex
       FROM reservas r JOIN clases c ON c.id = r.clase_id
       JOIN usuarios e ON e.id = r.estudiante_id JOIN usuarios p ON p.id = r.profesor_id
       LEFT JOIN resenas rs ON rs.reserva_id = r.id
-      WHERE ${esProf ? 'r.profesor_id' : 'r.estudiante_id'} = ? ORDER BY r.fecha DESC, r.hora DESC`).all(usuario.id);
+      WHERE ${esProf ? `r.profesor_id = ? AND r.pago_estado != 'por_pagar'` : `r.estudiante_id = ? AND NOT (r.pago_estado = 'sin_pago' AND r.estado = 'cancelada' AND r.monto_cop > 0)`} ORDER BY r.fecha DESC, r.hora DESC`).all(usuario.id);
     return {
       reservas: filas.map((r) => {
         const fin = terminada(r.fecha, r.hora, r.duracion_min);
@@ -137,6 +144,8 @@ export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, ex
           id: r.id, clase_id: r.clase_id, profesor_id: r.profesor_id, titulo: r.titulo, materia: r.materia,
           precio_hora: r.precio_hora, modalidad: r.modalidad, clase_ciudad: r.clase_ciudad, fecha: r.fecha, hora: r.hora, duracion_min: r.duracion_min,
           estado: r.estado, mensaje: r.mensaje, creado: r.creado, terminada: fin,
+          pago_estado: r.pago_estado, monto_cop: r.monto_cop,
+          ...(esProf ? { comision_cop: r.comision_cop, neto_cop: r.monto_cop - r.comision_cop } : {}),
           estudiante_nombre: r.estudiante_nombre, profesor_nombre: r.profesor_nombre,
           ...(esProf ? { estudiante_grado: r.estudiante_grado, estudiante_colegio_tipo: r.estudiante_colegio_tipo } : {}),
           contacto, contacto_de: contactoDe,
@@ -153,13 +162,25 @@ export function registrarAgenda({ db, q, ruta, VISIBLE, SELECT_CLASE, exigir, ex
     const nuevo = body.estado;
     const esProf = usuario.id === r.profesor_id, esEst = usuario.id === r.estudiante_id;
     const pasada = terminada(r.fecha, r.hora, r.duracion_min);
+    if (r.pago_estado === 'por_pagar') {
+      if (!esEst || nuevo !== 'cancelada') falla(409, 'Esta reserva está esperando el pago.');
+      q(`UPDATE reservas SET estado = 'cancelada', pago_estado = 'sin_pago' WHERE id = ?`).run(r.id);
+      return { ok: true };
+    }
     if (esProf && r.estado === 'pendiente' && ['aceptada', 'rechazada'].includes(nuevo)) {
       if (pasada) falla(409, 'Esa clase ya pasó.');
       if (nuevo === 'aceptada') exigirSuscripcion(usuario);
     } else if ((esProf || esEst) && nuevo === 'cancelada' && ['pendiente', 'aceptada'].includes(r.estado)) {
       if (pasada) falla(409, 'Esa clase ya pasó.');
     } else falla(403, 'No puedes hacer ese cambio.');
-    q('UPDATE reservas SET estado = ? WHERE id = ?').run(nuevo, r.id);
+    // Devolución: siempre si rechaza o cancela el mentor, o si el estudiante cancela algo aún no aceptado o con 24 h o más de anticipación.
+    let pagoEstado = r.pago_estado;
+    if (r.pago_estado === 'pagado') {
+      const horas = (Date.parse(`${r.fecha}T${r.hora}:00-05:00`) - Date.now()) / 3600000;
+      const sinDevolucion = nuevo === 'cancelada' && esEst && r.estado === 'aceptada' && horas < HORAS_CANCELACION;
+      if (!sinDevolucion) pagoEstado = 'reembolso_pendiente';
+    }
+    q('UPDATE reservas SET estado = ?, pago_estado = ? WHERE id = ?').run(nuevo, pagoEstado, r.id);
     notificar.reservaEstado(r.id, nuevo, usuario.id);
     return { ok: true };
   });

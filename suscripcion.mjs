@@ -1,4 +1,4 @@
-// Suscripción mensual (mentores y estudiantes) con pagos por Wompi (PSE, Nequi, tarjetas).
+// Suscripción mensual del estudiante con pagos por Wompi (PSE, Nequi, tarjetas).
 //
 // Flujo: POST /api/pagos/iniciar crea un pago pendiente y devuelve la URL del Web Checkout de Wompi.
 // Wompi confirma el pago de dos formas: (1) al volver el usuario a /api/pagos/retorno, donde consultamos
@@ -22,7 +22,19 @@ export function checksumEvento(evento, secreto) {
 const iguales = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && timingSafeEqual(x, y); };
 const apiWompi = (publicKey) => (publicKey.startsWith('pub_prod_') ? 'https://production.wompi.co/v1' : 'https://sandbox.wompi.co/v1');
 
-export function registrarSuscripcion({ db, q, ruta, config, fetchFn, exigir, suscripcionDe }) {
+/** URL del Web Checkout de Wompi para un pago (o null si Wompi no está configurado). */
+export function urlCheckout(config, referencia, monto) {
+  if (!config.wompi) return null;
+  const centavos = monto * 100;
+  const params = new URLSearchParams({
+    'public-key': config.wompi.publicKey, currency: 'COP', 'amount-in-cents': String(centavos), reference: referencia,
+    'signature:integrity': firmaIntegridad(referencia, centavos, 'COP', config.wompi.integritySecret),
+    'redirect-url': `${config.baseUrl}/api/pagos/retorno`,
+  });
+  return `https://checkout.wompi.co/p/?${params}`;
+}
+
+export function registrarSuscripcion({ db, q, ruta, config, fetchFn, exigir, suscripcionDe, notificar }) {
   /** Marca el pago según el estado de Wompi y, si se aprobó por primera vez, extiende la suscripción 30 días. */
   function aplicarTransaccion({ reference: referencia, status, amount_in_cents: centavos, id }) {
     const pago = q('SELECT * FROM pagos WHERE referencia = ?').get(referencia);
@@ -37,7 +49,13 @@ export function registrarSuscripcion({ db, q, ruta, config, fetchFn, exigir, sus
     try {
       const { changes } = q(`UPDATE pagos SET estado = ?, proveedor_id = ? WHERE id = ? AND estado != 'aprobado'`)
         .run(estado, String(id ?? ''), pago.id);
-      if (changes && estado === 'aprobado') {
+      if (changes && pago.referencia.startsWith('CLASE-')) {
+        // Pago de una clase: confirmado → la reserva llega al mentor; fallido → se libera el horario.
+        if (estado === 'aprobado') q(`UPDATE reservas SET pago_estado = 'pagado', pagado_en = datetime('now') WHERE pago_ref = ? AND pago_estado = 'por_pagar'`).run(pago.referencia);
+        else q(`UPDATE reservas SET estado = 'cancelada', pago_estado = 'sin_pago' WHERE pago_ref = ? AND pago_estado = 'por_pagar'`).run(pago.referencia);
+        // Pago aprobado cuando la reserva ya había expirado: no hay clase, así que el dinero se devuelve.
+        if (estado === 'aprobado') q(`UPDATE reservas SET pago_estado = 'reembolso_pendiente', pagado_en = datetime('now') WHERE pago_ref = ? AND pago_estado = 'sin_pago'`).run(pago.referencia);
+      } else if (changes && estado === 'aprobado') {
         const actual = q('SELECT vence FROM suscripciones WHERE usuario_id = ?').get(pago.usuario_id);
         const base = Math.max(Date.now(), actual ? Date.parse(actual.vence.replace(' ', 'T') + 'Z') : 0);
         q(`INSERT INTO suscripciones (usuario_id, vence) VALUES (?, ?)
@@ -45,6 +63,10 @@ export function registrarSuscripcion({ db, q, ruta, config, fetchFn, exigir, sus
       }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
+    if (estado === 'aprobado' && pago.referencia.startsWith('CLASE-')) {
+      const r = q('SELECT id FROM reservas WHERE pago_ref = ?').get(pago.referencia);
+      if (r) notificar?.reservaPagada(r.id);
+    }
     return q('SELECT * FROM pagos WHERE id = ?').get(pago.id);
   }
 
@@ -58,20 +80,14 @@ export function registrarSuscripcion({ db, q, ruta, config, fetchFn, exigir, sus
   });
 
   ruta('POST', '/api/pagos/iniciar', ({ usuario }) => {
-    exigir(usuario);
+    exigir(usuario, 'estudiante');
     if (!config.wompi && !config.pagosSimulados) falla(503, 'Los pagos aún no están configurados.');
     const monto = config.precios[usuario.rol];
     const referencia = `ARTIA-${randomBytes(8).toString('hex')}`;
     const { lastInsertRowid } = q('INSERT INTO pagos (usuario_id, referencia, monto_cop, proveedor) VALUES (?,?,?,?)')
       .run(usuario.id, referencia, monto, config.wompi ? 'wompi' : 'simulado');
     if (!config.wompi) return json(201, { modo: 'simulado', pago_id: Number(lastInsertRowid), monto });
-    const centavos = monto * 100;
-    const params = new URLSearchParams({
-      'public-key': config.wompi.publicKey, currency: 'COP', 'amount-in-cents': String(centavos), reference: referencia,
-      'signature:integrity': firmaIntegridad(referencia, centavos, 'COP', config.wompi.integritySecret),
-      'redirect-url': `${config.baseUrl}/api/pagos/retorno`,
-    });
-    return json(201, { modo: 'wompi', url: `https://checkout.wompi.co/p/?${params}`, monto });
+    return json(201, { modo: 'wompi', url: urlCheckout(config, referencia, monto), monto });
   });
 
   // Solo desarrollo (PAGOS_SIMULADOS=1, nunca en producción): aprueba un pago sin pasar por Wompi.
@@ -80,7 +96,7 @@ export function registrarSuscripcion({ db, q, ruta, config, fetchFn, exigir, sus
     if (!config.pagosSimulados) falla(404, 'No encontrado.');
     const p = q(`SELECT * FROM pagos WHERE id = ? AND usuario_id = ? AND proveedor = 'simulado'`).get(body.pago_id, usuario.id) ?? falla(404, 'Pago no encontrado.');
     aplicarTransaccion({ reference: p.referencia, status: 'APPROVED', amount_in_cents: p.monto_cop * 100, id: `sim-${p.id}` });
-    return { suscripcion: suscripcionDe(usuario) };
+    return { suscripcion: suscripcionDe(usuario), reserva_pagada: p.referencia.startsWith('CLASE-') };
   });
 
   // Wompi devuelve al usuario aquí con ?id=<transacción>. No confiamos en la URL: consultamos la transacción a Wompi.
@@ -93,6 +109,7 @@ export function registrarSuscripcion({ db, q, ruta, config, fetchFn, exigir, sus
         if (tx?.reference) {
           const pago = aplicarTransaccion(tx);
           resultado = pago?.estado === 'aprobado' ? 'ok' : tx.status === 'PENDING' ? 'pendiente' : 'fallo';
+          if (String(tx.reference).startsWith('CLASE-')) return redirigir(`/#/agenda?pago=${resultado}`);
         }
       }
     } catch (e) { console.error('Error consultando Wompi:', e.message); resultado = 'pendiente'; }

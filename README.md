@@ -22,7 +22,8 @@ Plataforma en español para conectar **mentores** (profesores) y **estudiantes**
 - Reseñas y calificación promedio visibles en su perfil y en sus clases.
 
 **Suscripción mensual (ambos roles)**
-- Mentor: sus clases solo son públicas con verificación **y** suscripción activa. Estudiante: necesita suscripción activa para reservar y publicar solicitudes.
+- Mentor: **no paga suscripción**; sus clases son públicas con verificación. Artia retiene una comisión (`COMISION_PORCENTAJE`, 15 %) de cada clase. Estudiante: suscripción activa para reservar y publicar solicitudes, y paga cada clase a Artia al reservar (Wompi).
+- Cobro de clases: la reserva queda «por pagar» 30 min; al confirmarse el pago el mentor la ve. Devolución completa si rechaza/no responde/cancela el mentor, o si el estudiante cancela con ≥ 24 h; si cancela con menos de 24 h una clase aceptada, no hay devolución y el mentor cobra. Las devoluciones se hacen a mano en el panel de Wompi y se marcan en **Administración → Devoluciones**. Cada mes se paga a los mentores en **Administración → Pagos a mentores** (cuenta bancaria del mentor, valor − comisión) y se registra la referencia de la transferencia.
 - Pago con **Wompi** (PSE, Nequi, tarjetas). Cada pago suma 30 días; renovar antes de vencer suma desde la fecha de vencimiento.
 
 **KYC (verificación de identidad):** el mentor toca «Verificar mi identidad» (primer paso, sin escribir nada antes), toma foto de su cédula y una selfie con un proveedor de KYC (**Didit**), sube **la foto de su cédula y su título (los dos son obligatorios)** y termina. El número de cédula se lee del documento verificado y queda en su perfil; una misma cédula no puede estar en dos cuentas de mentor. El resultado se compara con su perfil: nombre (y la cédula si la había declarado) (acepta «APELLIDOS NOMBRES» y sin tildes), rostro y prueba de vida. **Si todo coincide el mentor queda verificado automáticamente** (`KYC_AUTO_APROBAR=0` lo desactiva y deja siempre la aprobación al administrador); si algo no coincide pasa al administrador con los motivos; si el proveedor rechaza el documento, el mentor puede reintentar. El título no lo valida el KYC: queda disponible para revisión del administrador. Mientras no haya proveedor conectado se usa la revisión manual de documentos.
@@ -51,7 +52,8 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 | `RESEND_API_KEY`, `EMAIL_REMITENTE` | Correos con Resend. `EMAIL_REMITENTE` debe usar un dominio verificado en Resend, p. ej. `Artia <avisos@tudominio.com>`. Sin ellas no se envía ningún correo |
 | `WOMPI_PUBLIC_KEY`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_EVENTS_SECRET` | Llaves de Wompi. Con `pub_test_…` usa el sandbox; con `pub_prod_…`, producción |
 | `PAGOS_SIMULADOS=1` | Solo desarrollo: aprueba pagos sin Wompi |
-| `PRECIO_MENTOR` (59900), `PRECIO_ESTUDIANTE` (24900) | Precio mensual en COP |
+| `PRECIO_ESTUDIANTE` (24900) | Suscripción mensual del estudiante en COP (el mentor no paga) |
+| `COMISION_PORCENTAJE` (15) | Comisión de Artia sobre cada clase |
 | `KYC_AUTO_APROBAR` (1) | `0` para que el administrador apruebe siempre, aunque el KYC coincida |
 | `DIDIT_API_KEY`, `DIDIT_WORKFLOW_ID`, `DIDIT_WEBHOOK_SECRET` | Activan el KYC con Didit (ver «Conectar Didit») |
 | `KYC_SIMULADO=1` | Solo desarrollo: simula los resultados del proveedor de KYC (nunca en producción) |
@@ -73,6 +75,7 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
 - `server.mjs` — núcleo: acceso, perfiles, clases, solicitudes, despachador HTTP.
 - `agenda.mjs` — horarios, disponibilidad, reservas y reseñas.
 - `suscripcion.mjs` — pagos y suscripción (Wompi).
+- `cobros.mjs` — cobro de clases, comisión, devoluciones y liquidación mensual a mentores.
 - `verificacion.mjs` — documentos y revisión del administrador.
 - `supabase/schema.sql` — esquema equivalente para PostgreSQL/Supabase (preparado, sin probar).
 - `db.mjs`, `colombia.mjs`, `helpers.mjs` — esquema SQLite, datos de Colombia (ciudades, 20 localidades de Bogotá), utilidades.
@@ -88,7 +91,7 @@ Cuentas de ejemplo (contraseña `demo12345`): mentores `laura@demo.co`, `andres@
    - `NODE_ENV=production`, `TRUST_PROXY=1`
    - `ADMIN_EMAILS` (tu correo), `BASE_URL` (la URL pública; si no la pones usa `RAILWAY_PUBLIC_DOMAIN`)
    - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (la llave secreta)
-   - `PRECIO_ESTUDIANTE=24900`, `PRECIO_MENTOR=59900` (ya son los valores por defecto)
+   - `PRECIO_ESTUDIANTE=24900`, `COMISION_PORCENTAJE=15` (ya son los valores por defecto)
    - Wompi cuando las tengas: `WOMPI_PUBLIC_KEY`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_EVENTS_SECRET`
 6. Abre la URL, regístrate con el correo de `ADMIN_EMAILS` y ya eres administrador.
 7. Dominio propio: Settings → Networking → Custom Domain (HTTPS automático). Actualiza `BASE_URL`.

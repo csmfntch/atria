@@ -3,13 +3,14 @@ import { aMinutos, hoyCol, minutosAhoraCol, sumarDias } from './helpers.mjs';
 
 const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const cop = (n) => '$' + Number(n).toLocaleString('es-CO');
 const cuando = (fecha, hora) => {
   const d = new Date(`${fecha}T12:00:00Z`);
   const [h, m] = hora.split(':').map(Number);
   return `${DIAS[d.getUTCDay()]} ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]}, ${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'a. m.' : 'p. m.'} (hora de Colombia)`;
 };
 
-export function crearNotificador({ q, correo, baseUrl }) {
+export function crearNotificador({ q, correo, baseUrl, mantenimiento }) {
   const enlace = (hash, texto) => ({ texto, url: `${baseUrl}/#/${hash}` });
   const reserva = (id) => q(`SELECT r.*, c.titulo, c.materia, e.nombre AS est_nombre, e.email AS est_email, e.suspendido AS est_susp,
       p.nombre AS prof_nombre, p.email AS prof_email, p.suspendido AS prof_susp
@@ -19,12 +20,33 @@ export function crearNotificador({ q, correo, baseUrl }) {
   const nombre1 = (n) => String(n).split(' ')[0];
 
   return {
-    reservaNueva(id) {
+    /** El pago de la clase se confirmó: avisa al mentor (que ya puede aceptarla) y al estudiante. */
+    reservaPagada(id) {
       const r = reserva(id); if (!r) return;
       enviar(r.prof_email, r.prof_susp, {
         asunto: `Nueva solicitud de reserva: ${r.titulo}`, titulo: 'Tienes una nueva solicitud de reserva',
         parrafos: [`Hola ${nombre1(r.prof_nombre)}, ${r.est_nombre} quiere tomar «${r.titulo}» el ${cuando(r.fecha, r.hora)}.`, ...(r.mensaje ? [`Mensaje: “${r.mensaje}”`] : []), 'Acéptala o recházala desde tu agenda para que el estudiante lo sepa.'],
         boton: enlace('agenda', 'Ver mi agenda'),
+      });
+      enviar(r.est_email, r.est_susp, {
+        asunto: `Pago recibido: ${r.titulo}`, titulo: 'Recibimos tu pago',
+        parrafos: [`Hola ${nombre1(r.est_nombre)}, recibimos tu pago de ${cop(r.monto_cop)} por «${r.titulo}» (${cuando(r.fecha, r.hora)}).`, `Ahora ${r.prof_nombre} debe aceptar tu reserva. Si no la acepta o no puede darte la clase, te devolvemos el valor completo.`],
+        boton: enlace('agenda', 'Ver mi agenda'),
+      });
+    },
+    devuelta(id) {
+      const r = reserva(id); if (!r) return;
+      enviar(r.est_email, r.est_susp, {
+        asunto: `Devolución realizada: ${r.titulo}`, titulo: 'Te devolvimos tu pago',
+        parrafos: [`Hola ${nombre1(r.est_nombre)}, hicimos la devolución de ${cop(r.monto_cop)} de «${r.titulo}». Según tu banco o medio de pago, puede tardar unos días en verse reflejada.`],
+      });
+    },
+    liquidacion(profId, mes, neto, referencia) {
+      const p = q('SELECT nombre, email, suspendido FROM usuarios WHERE id = ?').get(profId); if (!p) return;
+      enviar(p.email, p.suspendido, {
+        asunto: `Te pagamos las clases de ${mes}`, titulo: 'Pago de tus clases',
+        parrafos: [`Hola ${nombre1(p.nombre)}, te transferimos ${cop(neto)} por tus clases de ${mes} (ya descontada la comisión de Artia). Referencia: ${referencia}.`],
+        boton: enlace('ganancias', 'Ver mis ganancias'),
       });
     },
     /** `por`: id de quien hizo el cambio. */
@@ -38,7 +60,7 @@ export function crearNotificador({ q, correo, baseUrl }) {
       });
       else if (estado === 'rechazada') enviar(r.est_email, r.est_susp, {
         asunto: `Tu reserva no fue aceptada: ${r.titulo}`, titulo: 'Tu reserva no pudo confirmarse',
-        parrafos: [`Hola ${nombre1(r.est_nombre)}, ${r.prof_nombre} no pudo aceptar tu reserva de «${r.titulo}» del ${cuandoTxt}.`, 'Puedes elegir otro horario u otro mentor.'],
+        parrafos: [`Hola ${nombre1(r.est_nombre)}, ${r.prof_nombre} no pudo aceptar tu reserva de «${r.titulo}» del ${cuandoTxt}.`, 'Te devolveremos el valor completo de la clase. Puedes elegir otro horario u otro mentor.'],
         boton: enlace('clase/' + r.clase_id, 'Elegir otro horario'),
       });
       else if (estado === 'cancelada') {
@@ -62,6 +84,7 @@ export function crearNotificador({ q, correo, baseUrl }) {
     },
     /** Se ejecuta cada pocos minutos: recordatorio 24 h antes y petición de reseña ~30 min después de la clase. */
     procesar() {
+      mantenimiento?.();
       if (!correo.activo) return;
       const hoy = hoyCol(), ahora = minutosAhoraCol();
       for (const r of q(`SELECT id, fecha, hora, duracion_min FROM reservas WHERE estado = 'aceptada' AND aviso_recordatorio = 0 AND fecha BETWEEN ? AND ?`).all(hoy, sumarDias(hoy, 1))) {

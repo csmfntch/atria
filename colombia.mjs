@@ -71,4 +71,4 @@ export function normalizarCelular(valor) {
 // Versión vigente de los Términos y la Política de privacidad. Súbela cuando cambien los textos: se pedirá aceptarlos de nuevo.
 export const ORIGENES_DOCUMENTO = ['colombiano', 'extranjero'];
 
-export const TERMINOS_VERSION = '2026-11-09';
+export const TERMINOS_VERSION = '2026-11-12';

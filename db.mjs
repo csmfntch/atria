@@ -193,6 +193,28 @@ export function abrirBD(ruta) {
   agregarColumna(db, 'reservas', 'aviso_resena', 'INTEGER NOT NULL DEFAULT 0');
   agregarColumna(db, 'reservas', 'aviso_recordatorio', 'INTEGER NOT NULL DEFAULT 0');
   if (avisosNuevos) db.exec('UPDATE reservas SET aviso_resena = 1, aviso_recordatorio = 1'); // no avisar de lo anterior
+  // Cobro de clases (el estudiante paga a Artia; Artia liquida cada mes al mentor descontando la comisión).
+  for (const [col, def] of [
+    ['pago_estado', `TEXT NOT NULL DEFAULT 'sin_pago'`],   // sin_pago (reservas anteriores) | por_pagar | pagado | reembolso_pendiente | reembolsado
+    ['monto_cop', 'INTEGER NOT NULL DEFAULT 0'], ['comision_cop', 'INTEGER NOT NULL DEFAULT 0'],
+    ['pago_ref', `TEXT NOT NULL DEFAULT ''`], ['pagado_en', `TEXT NOT NULL DEFAULT ''`], ['liquidacion_id', 'INTEGER'],
+  ]) agregarColumna(db, 'reservas', col, def);
+  for (const [col, def] of [['cuenta_banco', `TEXT NOT NULL DEFAULT ''`], ['cuenta_tipo', `TEXT NOT NULL DEFAULT ''`],
+    ['cuenta_numero', `TEXT NOT NULL DEFAULT ''`], ['cuenta_titular', `TEXT NOT NULL DEFAULT ''`]]) agregarColumna(db, 'usuarios', col, def);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS liquidaciones (
+      id            INTEGER PRIMARY KEY,
+      profesor_id   INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+      mes           TEXT NOT NULL,                 -- YYYY-MM
+      clases        INTEGER NOT NULL,
+      bruto_cop     INTEGER NOT NULL,
+      comision_cop  INTEGER NOT NULL,
+      neto_cop      INTEGER NOT NULL,
+      referencia    TEXT NOT NULL DEFAULT '',      -- referencia de la transferencia al mentor
+      pagado_en     TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (profesor_id, mes)
+    );
+  `);
   agregarColumna(db, 'usuarios', 'cal_token', `TEXT NOT NULL DEFAULT ''`);
   agregarColumna(db, 'documentos', 'ruta', `TEXT NOT NULL DEFAULT ''`);
 

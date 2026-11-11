@@ -15,6 +15,7 @@ import {
 } from './helpers.mjs';
 import { registrarAgenda } from './agenda.mjs';
 import { registrarCalendario } from './calendario.mjs';
+import { registrarCobros } from './cobros.mjs';
 import { crearCorreo } from './correo.mjs';
 import { crearNotificador } from './avisos.mjs';
 import { registrarSuscripcion } from './suscripcion.mjs';
@@ -53,6 +54,8 @@ export function configDesdeEnv(env = process.env) {
     legalRevisado: env.LEGAL_REVISADO === '1',
     // Correos con Resend: RESEND_API_KEY y EMAIL_REMITENTE (por ejemplo «Artia <avisos@tudominio.com>», con el dominio verificado en Resend).
     correo: env.RESEND_API_KEY && env.EMAIL_REMITENTE ? { apiKey: env.RESEND_API_KEY, remitente: env.EMAIL_REMITENTE } : null,
+    // Comisión de Artia sobre cada clase (se descuenta al mentor en la liquidación mensual).
+    comisionPct: Number(env.COMISION_PORCENTAJE ?? 15),
     limiteRegistros: Number(env.LIMITE_REGISTROS_HORA ?? 20),
     // KYC: simulado solo en desarrollo; en producción lo da el proveedor (Didit) cuando esté integrado.
     // KYC_PROVEEDOR=manual apaga Didit (verificación manual de documentos por un administrador) sin borrar las llaves.
@@ -77,7 +80,9 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   const suscripcionDe = (u) => {
     const s = q('SELECT vence FROM suscripciones WHERE usuario_id = ?').get(u.id);
     const activa = !!s && s.vence > new Date().toISOString().slice(0, 19).replace('T', ' ');
-    return { activa, vence: s?.vence ?? null, precio: config.precios[u.rol], plan: u.rol === 'profesor' ? 'Mentor' : 'Estudiante' };
+    // Los mentores no pagan suscripción: Artia cobra la comisión sobre cada clase.
+    if (u.rol === 'profesor') return { activa: true, vence: null, precio: 0, plan: 'Mentor (sin costo)' };
+    return { activa, vence: s?.vence ?? null, precio: config.precios[u.rol], plan: 'Estudiante' };
   };
   const resumenResenas = (profId) => q('SELECT COUNT(*) AS n, ROUND(AVG(calificacion), 1) AS promedio FROM resenas WHERE profesor_id = ?').get(profId);
 
@@ -102,7 +107,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     return [
       { id: 'perfil', ok: !!(u.ciudad && u.telefono && u.materias && u.tarifa > 0), texto: 'Completa tu perfil', enlace: '#/perfil' },
       { id: 'verificacion', ok: u.verificacion_estado === 'verificado', nota: u.verificacion_estado === 'pendiente' ? 'En revisión' : '', texto: 'Verifica tu identidad (cédula y título)', enlace: '#/verificacion' },
-      { id: 'suscripcion', ok: suscrita, texto: 'Activa tu suscripción', enlace: '#/suscripcion' },
+      { id: 'cobros', ok: !!(u.cuenta_numero && u.cuenta_titular), texto: 'Agrega los datos para recibir tus pagos', enlace: '#/ganancias' },
       { id: 'clase', ok: contar('SELECT COUNT(*) AS n FROM clases WHERE profesor_id = ?') > 0, texto: 'Publica tu primera clase', enlace: '#/mis-clases' },
       { id: 'horarios', ok: contar('SELECT COUNT(*) AS n FROM horarios WHERE profesor_id = ?') > 0, texto: 'Define tus horarios disponibles', enlace: '#/horarios' },
     ];
@@ -123,6 +128,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
     acudiente_nombre: u.acudiente_nombre, acudiente_celular: u.acudiente_celular,
     clave_temporal: !!u.clave_temporal, terminos_ok: u.terminos_version === TERMINOS_VERSION, terminos_version: u.terminos_version,
     verificacion_autorizada: !!u.verificacion_autorizada,
+    cuenta: u.rol === 'profesor' ? { banco: u.cuenta_banco, tipo: u.cuenta_tipo, numero: u.cuenta_numero, titular: u.cuenta_titular } : undefined,
     suscripcion: suscripcionDe(u), pasos: pasosDe(u), resenas_pendientes: resenasPendientes(u),
   });
 
@@ -132,7 +138,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
       (SELECT ROUND(AVG(calificacion), 1) FROM resenas r WHERE r.profesor_id = c.profesor_id) AS promedio,
       (SELECT COUNT(*) FROM resenas r WHERE r.profesor_id = c.profesor_id) AS num_resenas
     FROM clases c JOIN usuarios u ON u.id = c.profesor_id`;
-  const VISIBLE = `c.activa = 1 AND u.suspendido = 0 AND u.verificacion_estado = 'verificado' AND ${SUSCRITO('u.id')}`;
+  const VISIBLE = `c.activa = 1 AND u.suspendido = 0 AND u.verificacion_estado = 'verificado'`;
 
   // ----- sesión -----
   function crearSesion(res, usuarioId) {
@@ -177,7 +183,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
   const rutas = [];
   const ruta = (metodo, patron, fn, opciones = {}) => rutas.push({ metodo, re: new RegExp(`^${patron}$`), fn, ...opciones });
   const correo = correoExterno ?? crearCorreo({ ...(config.correo ?? {}), baseUrl: config.baseUrl, fetchFn });
-  const notificar = crearNotificador({ q, correo, baseUrl: config.baseUrl });
+  const notificar = crearNotificador({ q, correo, baseUrl: config.baseUrl, mantenimiento: () => ctx.mantenimientoCobros?.() });
   const ctx = {
     notificar, db, q, ruta, config, fetchFn, almacen, kyc: kyc ?? (config.didit ? proveedorDidit({ ...config.didit, baseUrl: config.baseUrl, fetchFn }) : config.kycSimulado ? proveedorSimulado() : null), SUSCRITO, SELECT_CLASE, VISIBLE, suscripcionDe, publico, privado,
     exigir, exigirAdmin, exigirSuscripcion, exigirMentorActivo, perfilEstudianteFalta, resumenResenas,
@@ -286,10 +292,12 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
       q('DELETE FROM horarios WHERE profesor_id = ?').run(usuario.id);
       q('DELETE FROM solicitudes WHERE estudiante_id = ?').run(usuario.id);
       q('UPDATE clases SET activa = 0 WHERE profesor_id = ?').run(usuario.id);
-      q(`UPDATE reservas SET estado = 'cancelada' WHERE (profesor_id = ? OR estudiante_id = ?) AND estado IN ('pendiente','aceptada') AND fecha >= ?`).run(usuario.id, usuario.id, hoy);
+      // Al cerrar la cuenta se cancelan las clases futuras y se devuelve lo pagado por ellas.
+      q(`UPDATE reservas SET estado = 'cancelada', pago_estado = CASE WHEN pago_estado = 'pagado' THEN 'reembolso_pendiente' ELSE pago_estado END
+         WHERE (profesor_id = ? OR estudiante_id = ?) AND estado IN ('pendiente','aceptada') AND fecha >= ?`).run(usuario.id, usuario.id, hoy);
       q(`UPDATE usuarios SET email = ?, nombre = 'Cuenta eliminada', pass_hash = '!', ciudad = '', telefono = '', bio = '', materias = '', tarifa = 0,
          experiencia = '', documento = '', nivel = '', intereses = '', colegio_nombre = '', localidad = '', grado = '', acudiente_nombre = '',
-         acudiente_celular = '', kyc_sesion = '', kyc_resultado = '', verificacion_nota = '', cal_token = '', suspendido = 1 WHERE id = ?`).run(`eliminado-${usuario.id}@artia.invalid`, usuario.id);
+         acudiente_celular = '', kyc_sesion = '', kyc_resultado = '', verificacion_nota = '', cal_token = '', cuenta_banco = '', cuenta_tipo = '', cuenta_numero = '', cuenta_titular = '', suspendido = 1 WHERE id = ?`).run(`eliminado-${usuario.id}@artia.invalid`, usuario.id);
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     res.setHeader('Set-Cookie', 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
@@ -380,8 +388,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
 
   ruta('GET', '/api/clases/mias', ({ usuario }) => {
     exigir(usuario, 'profesor');
-    const motivo = usuario.verificacion_estado !== 'verificado' ? 'Pendiente de verificación'
-      : !suscripcionDe(usuario).activa ? 'Suscripción inactiva' : '';
+    const motivo = usuario.verificacion_estado !== 'verificado' ? 'Pendiente de verificación' : '';
     return { clases: q(`${SELECT_CLASE} WHERE c.profesor_id = ? ORDER BY c.id DESC`).all(usuario.id).map((c) => ({ ...c, oculta_por: c.activa ? motivo : '' })) };
   });
 
@@ -484,6 +491,7 @@ export function crearApp(db, configParcial = {}, { fetchFn = globalThis.fetch, a
 
   registrarAgenda(ctx);
   registrarCalendario(ctx);
+  registrarCobros(ctx);
   registrarSuscripcion(ctx);
   registrarVerificacion(ctx);
   registrarAdmin(ctx);
@@ -549,12 +557,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const puerto = Number(process.env.PORT ?? 3100);
   const config = configDesdeEnv();
   if (config.seguro && !config.didit) console.warn('⚠ DIDIT_* no configurado: la verificación de mentores será manual (revisión de documentos).');
-  if (config.seguro && !config.wompi) console.warn('⚠ WOMPI_PUBLIC_KEY / WOMPI_INTEGRITY_SECRET no configurados: no se podrán cobrar suscripciones.');
+  if (config.seguro && !config.wompi) console.warn('⚠ WOMPI_PUBLIC_KEY / WOMPI_INTEGRITY_SECRET no configurados: no se podrán cobrar suscripciones ni clases.');
   // Documentos de verificación: Supabase Storage (bucket privado) si hay SUPABASE_URL; si no, la base local.
   const almacen = process.env.SUPABASE_URL ? crearAlmacen({ url: process.env.SUPABASE_URL, key: process.env.SUPABASE_SERVICE_ROLE_KEY }) : null;
   const manejador = crearApp(db, config, { almacen });
-  if (config.correo) setInterval(() => { try { manejador.avisos(); } catch (e) { console.error('Avisos:', e.message); } }, 10 * 60 * 1000).unref();
-  else console.warn('⚠ RESEND_API_KEY / EMAIL_REMITENTE no configurados: no se enviarán correos.');
+  setInterval(() => { try { manejador.avisos(); } catch (e) { console.error('Avisos:', e.message); } }, 5 * 60 * 1000).unref();
+  if (!config.correo) console.warn('⚠ RESEND_API_KEY / EMAIL_REMITENTE no configurados: no se enviarán correos.');
   createServer(manejador).listen(puerto, () =>
     console.log(`Artia en http://localhost:${puerto}  (BD: ${rutaBD}${config.wompi ? ', Wompi activo' : config.pagosSimulados ? ', pagos simulados' : ''}${almacen ? ', documentos en Supabase Storage' : ''})`));
 }

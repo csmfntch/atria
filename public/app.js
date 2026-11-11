@@ -73,7 +73,7 @@ function avisosCuenta() {
   }
   if (!s.activa && yo.rol === 'profesor') {
     items.push(html`${yo.rol === 'profesor' ? 'Activa tu suscripción para publicar tus clases y recibir reservas.' : 'Activa tu suscripción para reservar clases.'} <a href="#/suscripcion">Ir a suscripción</a>`);
-  } else if (Date.parse(s.vence.replace(' ', 'T') + 'Z') - Date.now() < 5 * 86400000) {
+  } else if (s.activa && Date.parse(s.vence.replace(' ', 'T') + 'Z') - Date.now() < 5 * 86400000) {
     items.push(html`Tu suscripción vence el ${fechaSQL(s.vence)}. <a href="#/suscripcion">Renovar</a>`);
   }
   if (yo.rol === 'estudiante' && perfilEstudianteIncompleto(yo)) items.push(html`Completa tu perfil (colegio y acudiente si eres menor) para poder reservar. <a href="#/perfil">Ir a mi perfil</a>`);

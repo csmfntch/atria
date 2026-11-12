@@ -84,5 +84,4 @@ export const privacidad = (EMPRESA) => ({
   ],
 });
 
-export const AUTORIZACION_VERIFICACION =
-  'Autorizo de forma expresa, previa e informada a Artia y a su proveedor Didit para tratar mi cédula, la foto de mi documento, mi selfie (dato biométrico, sensible) y mi título o certificado, con el único fin de verificar mi identidad y mis credenciales como mentor y prevenir fraudes. Sé que no estoy obligado a autorizarlo, aunque sin hacerlo no podré ser mentor, y que puedo revocar esta autorización escribiendo al correo indicado en la Política de Tratamiento de Datos.';
+export const AUTORIZACION_VERIFICACION = 'Autorizo el tratamiento de mis datos personales.';

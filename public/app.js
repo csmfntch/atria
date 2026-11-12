@@ -121,7 +121,7 @@ async function vistaInicio() {
   pintar(html`
     <section class="hero">
       <h1>El arte de <br><em>aprender.</em></h1>
-      <p>Conecta con profesores, creadores y mentores de toda Colombia para dominar nuevas habilidades y oficios. Clases virtuales y presenciales, en pesos colombianos.</p>
+      <p>Conecta con profesores, creadores y mentores de toda Colombia para dominar nuevas habilidades y oficios. Clases virtuales y presenciales.</p>
       <div class="acciones">
         <a class="btn morado" href="#/clases">Encontrar una clase</a>
         ${yo?.rol === 'profesor' ? html`<a class="btn sec" href="#/mis-clases">Mis clases</a>`

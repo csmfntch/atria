@@ -4,23 +4,31 @@ const $nav = document.getElementById('nav');
 const $aviso = document.getElementById('aviso');
 
 import { terminos, privacidad, datosEmpresa, AUTORIZACION_VERIFICACION } from '/legal.js';
+import { tr, trPlantilla, traducirDom, EN_ACTIVO, idioma, cambiarIdioma } from '/i18n.js';
 
 // ---------- utilidades ----------
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 class Raw { constructor(s) { this.s = s; } }
 const val = (v) => (v instanceof Raw ? v.s : Array.isArray(v) ? v.map(val).join('') : esc(v));
-const html = (t, ...v) => new Raw(t.reduce((a, s, i) => a + s + (i < v.length ? val(v[i]) : ''), ''));
+// html`...`: en inglés se traducen las partes fijas y los textos que se insertan en el cuerpo (no los valores de atributos).
+const html = (t, ...v) => {
+  const { strings, texto } = trPlantilla(t);
+  return new Raw(strings.reduce((a, s, i) => a + s + (i < v.length ? val(texto && texto[i] && typeof v[i] === 'string' ? tr(v[i]) : v[i]) : ''), ''));
+};
+const confirmar = (m) => confirm(tr(m));
+const pedir = (m, v) => prompt(tr(m), v);
 const sel = (cond) => (cond ? new Raw('selected') : '');
 const chk = (cond) => (cond ? new Raw('checked') : '');
 
-const cop = (n) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n);
+const LOCALE = EN_ACTIVO ? 'en-US' : 'es-CO';
+const cop = (n) => new Intl.NumberFormat(EN_ACTIVO ? 'en-US' : 'es-CO', { style: 'currency', currency: 'COP', ...(EN_ACTIVO ? { currencyDisplay: 'code' } : {}), maximumFractionDigits: 0 }).format(n);
 const MOD = { virtual: 'Virtual', presencial: 'Presencial', ambas: 'Virtual y presencial' };
 const ESTADO = { pendiente: 'espera', aceptada: 'ok', rechazada: 'mal', cancelada: 'mal' };
 const ESTADO_TXT = { pendiente: 'Pendiente', aceptada: 'Confirmada', rechazada: 'Rechazada', cancelada: 'Cancelada' };
 const COLEGIO = { publico: 'Colegio público', privado: 'Colegio privado', ninguno: 'Sin colegio' };
-const fechaSQL = (s) => new Date(s.replace(' ', 'T') + 'Z').toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' });
-const diaLargo = (f) => new Date(f + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' });
-const hora12 = (h) => { const [H, M] = h.split(':').map(Number); return `${H % 12 || 12}:${String(M).padStart(2, '0')} ${H < 12 ? 'a. m.' : 'p. m.'}`; };
+const fechaSQL = (s) => new Date(s.replace(' ', 'T') + 'Z').toLocaleDateString(LOCALE, { day: 'numeric', month: 'short', year: 'numeric' });
+const diaLargo = (f) => new Date(f + 'T12:00:00').toLocaleDateString(LOCALE, { weekday: 'long', day: 'numeric', month: 'long' });
+const hora12 = (h) => { const [H, M] = h.split(':').map(Number); return `${H % 12 || 12}:${String(M).padStart(2, '0')} ${H < 12 ? (EN_ACTIVO ? 'AM' : 'a. m.') : (EN_ACTIVO ? 'PM' : 'p. m.')}`; };
 const finHora = (h, dur) => { const t = Number(h.slice(0, 2)) * 60 + Number(h.slice(3)) + dur; return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
 const celular = (t) => `${t.slice(0, 3)} ${t.slice(3, 6)} ${t.slice(6)}`;
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -42,16 +50,16 @@ async function api(metodo, ruta, cuerpo) {
   return datos;
 }
 function avisar(msg) {
-  $aviso.textContent = msg;
+  $aviso.textContent = tr(msg);
   $aviso.classList.add('ver');
   setTimeout(() => $aviso.classList.remove('ver'), 3200);
 }
 const opciones = (lista, actual = '', vacio) =>
-  html`${vacio ? html`<option value="">${vacio}</option>` : ''}${lista.map((x) => html`<option ${sel(x === actual)}>${x}</option>`)}`;
+  html`${vacio ? html`<option value="">${vacio}</option>` : ''}${lista.map((x) => html`<option value="${x}" ${sel(x === actual)}>${x}</option>`)}`;
 /** <option>s de materias agrupadas por categoría. */
 const opcionesMaterias = (actual = '', vacio) =>
   html`${vacio ? html`<option value="">${vacio}</option>` : ''}${catalogo.categorias.map((c) =>
-    html`<optgroup label="${c.nombre}">${c.materias.map((m) => html`<option ${sel(m === actual)}>${m}</option>`)}</optgroup>`)}`;
+    html`<optgroup label="${tr(c.nombre)}">${c.materias.map((m) => html`<option value="${m}" ${sel(m === actual)}>${m}</option>`)}</optgroup>`)}`;
 const optMod = (actual) => html`${Object.entries(MOD).map(([k, v]) => html`<option value="${k}" ${sel(k === actual)}>${v}</option>`)}`;
 const datosForm = (f) => { const o = {}; for (const [k, v] of new FormData(f)) o[k] = k in o ? `${o[k]}, ${v}` : v; return o; };
 const fallo = (e) => html`<p class="error" role="alert">${e.message}</p>`;
@@ -95,8 +103,9 @@ function pintarNav() {
   const cuenta = ['#/perfil', '#/suscripcion', '#/verificacion', '#/ganancias'];
   $nav.innerHTML = enlaces.map(([h, t]) => {
     const activo = h === '#/perfil' ? cuenta.some((c) => actual.startsWith(c)) : actual.startsWith(h);
-    return `<a href="${h}" ${activo ? 'aria-current="page"' : ''}>${esc(t)}</a>`;
-  }).join('') + (yo && !yo.suscripcion.activa ? '<a href="#/suscripcion" class="btn chico activar">Activa tu suscripción</a>' : '') + (yo ? '<button data-accion="salir">Salir</button>' : '<a href="#/ingresar">Ingresar</a><a href="#/registro" class="btn chico">Crear cuenta</a>');
+    return `<a href="${h}" ${activo ? 'aria-current="page"' : ''}>${esc(tr(t))}</a>`;
+  }).join('') + (yo && !yo.suscripcion.activa ? `<a href="#/suscripcion" class="btn chico activar">${esc(tr('Activa tu suscripción'))}</a>` : '') + (yo ? `<button data-accion="salir">${esc(tr('Salir'))}</button>` : `<a href="#/ingresar">${esc(tr('Ingresar'))}</a><a href="#/registro" class="btn chico">${esc(tr('Crear cuenta'))}</a>`)
+    + `<button class="idioma" data-accion="idioma" data-idioma="${idioma === 'en' ? 'es' : 'en'}" aria-label="${idioma === 'en' ? 'Cambiar a español' : 'Switch to English'}" title="${idioma === 'en' ? 'Español' : 'English'}">🌐 ${idioma === 'en' ? 'ES' : 'EN'}</button>`;
 }
 const tabsCuenta = (actual) => html`
   <div class="tabs" role="tablist">
@@ -130,7 +139,7 @@ async function vistaInicio() {
       </div>
     </section>
     <section class="mision" aria-labelledby="mision-t">
-      <p class="mision-meta"><b>10.000.000</b> personas más felices · <b>2030</b></p>
+      <p class="mision-meta"><b>${(10000000).toLocaleString(LOCALE)}</b> personas más felices · <b>2030</b></p>
       <h2 id="mision-t">Conectamos metas y pasiones en un solo lugar.</h2>
       <div class="mision-cols">
         <article><h3>Nuestra misión</h3><p>Hacer más felices a 10 millones de personas para 2030, conectándolas con quienes pueden guiarlas para que alcancen sus metas y sueños.</p></article>
@@ -575,7 +584,7 @@ function pintarHorarios() {
           ${del.map((b) => html`<div class="bloque" data-bloque data-dia="${dia}">
             <label>Desde<input type="time" name="inicio" value="${b.inicio}" required></label>
             <label>Hasta<input type="time" name="fin" value="${b.fin}" required></label>
-            <button type="button" class="btn peligro chico" data-accion="quitar-bloque" data-i="${b.i}" aria-label="Quitar bloque del ${nombre}">Quitar</button>
+            <button type="button" class="btn peligro chico" data-accion="quitar-bloque" data-i="${b.i}" aria-label="${tr(`Quitar bloque del ${nombre}`)}">Quitar</button>
           </div>`)}
           <button type="button" class="btn sec chico" data-accion="agregar-bloque" data-dia="${dia}">+ Agregar bloque</button>
         </fieldset>`;
@@ -877,6 +886,7 @@ function vistaAyudaClave() {
 function vistaLegal(doc, otro) {
   pintar(html`
     <article class="legal">
+      ${EN_ACTIVO ? html`<p class="banner espera" role="note">Los documentos legales están en español; en caso de diferencia, prevalece la versión en español.</p>` : ''}
       ${!catalogo.legalRevisado ? html`<p class="banner espera" role="note"><b>Borrador.</b> Este texto debe ser revisado por un abogado y completado antes de publicar la plataforma.</p>` : ''}
       <h1>${doc.titulo}</h1>
       <p class="suave">Versión ${catalogo.terminosVersion} · <a href="#/${otro[0]}">${otro[1]}</a></p>
@@ -983,7 +993,7 @@ document.addEventListener('submit', async (ev) => {
       case 'clave':
         await api('POST', '/api/clave', d); await refrescarYo(); f.reset(); avisar('Contraseña cambiada'); await enrutar(); break;
       case 'eliminar-cuenta':
-        if (!confirm('¿Seguro que quieres eliminar tu cuenta? No se puede deshacer.')) break;
+        if (!confirmar('¿Seguro que quieres eliminar tu cuenta? No se puede deshacer.')) break;
         await api('POST', '/api/cuenta/eliminar', d); yo = null; location.hash = '#/'; pintarNav(); avisar('Tu cuenta fue eliminada'); break;
       case 'autorizar':
         await api('POST', '/api/verificacion/autorizar', { acepto: 'acepto' in d }); await refrescarYo(); avisar('Autorización registrada'); await enrutar(); break;
@@ -1017,17 +1027,18 @@ document.addEventListener('click', async (ev) => {
   const { accion, id, estado, dia, i } = b.dataset;
   if (accion === 'menu') { const abierto = $nav.classList.toggle('abierto'); b.setAttribute('aria-expanded', abierto); return; }
   try {
+    if (accion === 'idioma') { cambiarIdioma(b.dataset.idioma); return; }
     if (accion === 'salir') { await api('POST', '/api/logout'); yo = null; location.hash = '#/'; pintarNav(); avisar('Sesión cerrada'); return; }
-    if (accion === 'borrar-clase' && confirm('¿Eliminar esta clase?')) { await api('DELETE', `/api/clases/${id}`); await enrutar(); }
-    if (accion === 'borrar-solicitud' && confirm('¿Eliminar esta solicitud?')) { await api('DELETE', `/api/solicitudes/${id}`); await enrutar(); }
+    if (accion === 'borrar-clase' && confirmar('¿Eliminar esta clase?')) { await api('DELETE', `/api/clases/${id}`); await enrutar(); }
+    if (accion === 'borrar-solicitud' && confirmar('¿Eliminar esta solicitud?')) { await api('DELETE', `/api/solicitudes/${id}`); await enrutar(); }
     if (accion === 'reserva') {
-      if (estado === 'cancelada' && !confirm(b.dataset.sinDevolucion ? 'Faltan menos de 24 horas para la clase: si la cancelas no habrá devolución del pago. ¿Cancelar de todos modos?' : '¿Cancelar esta clase?')) return;
+      if (estado === 'cancelada' && !confirmar(b.dataset.sinDevolucion ? 'Faltan menos de 24 horas para la clase: si la cancelas no habrá devolución del pago. ¿Cancelar de todos modos?' : '¿Cancelar esta clase?')) return;
       await api('PUT', `/api/reservas/${id}`, { estado }); await enrutar();
     }
     if (accion === 'pagar-reserva') { b.disabled = true; const r = await api('POST', `/api/reservas/${id}/pagar`); await pagarClase(r); return; }
-    if (accion === 'devolucion-hecha' && confirm('¿Ya devolviste este pago desde el panel de Wompi?')) { await api('POST', `/api/admin/devoluciones/${id}`); avisar('Devolución marcada'); await enrutar(); return; }
+    if (accion === 'devolucion-hecha' && confirmar('¿Ya devolviste este pago desde el panel de Wompi?')) { await api('POST', `/api/admin/devoluciones/${id}`); avisar('Devolución marcada'); await enrutar(); return; }
     if (accion === 'liquidar') {
-      const referencia = prompt(`Escribe la referencia de la transferencia a ${b.dataset.nombre} (por ${b.dataset.neto}):`);
+      const referencia = pedir(`Escribe la referencia de la transferencia a ${b.dataset.nombre} (por ${b.dataset.neto}):`);
       if (!referencia) return;
       await api('POST', '/api/admin/liquidaciones', { profesor_id: Number(id), mes: b.dataset.mes, referencia }); avisar('Pago registrado'); await enrutar(); return;
     }
@@ -1045,12 +1056,13 @@ document.addEventListener('click', async (ev) => {
       await refrescarYo(); avisar(r.estado === 'verificado' ? '¡Verificado automáticamente!' : 'Resultado procesado'); await enrutar(); return;
     }
     if (accion === 'cal-enlace' || accion === 'cal-regenerar') {
-      if (accion === 'cal-regenerar' && !confirm('El enlace anterior dejará de funcionar. ¿Generar uno nuevo?')) return;
+      if (accion === 'cal-regenerar' && !confirmar('El enlace anterior dejará de funcionar. ¿Generar uno nuevo?')) return;
       const c = await api(accion === 'cal-enlace' ? 'GET' : 'POST', accion === 'cal-enlace' ? '/api/calendario/enlace' : '/api/calendario/regenerar');
       document.getElementById('cal-caja').innerHTML = `<label>Tu enlace de calendario<input readonly value="${esc(c.url)}" onclick="this.select()"></label>
         <p class="acciones-fila"><a class="btn chico" href="${esc(c.webcal)}">Abrir en mi app de calendario</a>
         <a class="btn sec chico" target="_blank" rel="noopener" href="https://calendar.google.com/calendar/r?cid=${encodeURIComponent(c.webcal)}">Agregar a Google Calendar</a>
         <button class="btn sec chico" data-accion="cal-regenerar">Generar enlace nuevo</button></p>`;
+      traducirDom(document.getElementById('cal-caja'));
       return;
     }
     if (accion === 'aceptar-terminos') { ({ usuario: yo } = await api('POST', '/api/terminos/aceptar', { acepta_terminos: true })); avisar('Gracias por aceptar'); await enrutar(); return; }
@@ -1067,18 +1079,18 @@ document.addEventListener('click', async (ev) => {
     }
     if (accion === 'suspender') {
       const suspender = estado === 'si';
-      if (!confirm(suspender ? `¿Suspender a ${b.dataset.nombre}? Se cerrará su sesión y sus clases dejarán de verse.` : `¿Reactivar a ${b.dataset.nombre}?`)) return;
+      if (!confirmar(suspender ? `¿Suspender a ${b.dataset.nombre}? Se cerrará su sesión y sus clases dejarán de verse.` : `¿Reactivar a ${b.dataset.nombre}?`)) return;
       await api('PUT', `/api/admin/usuarios/${id}/suspender`, { suspendido: suspender }); avisar(suspender ? 'Usuario suspendido' : 'Usuario reactivado'); await enrutar(); return;
     }
     if (accion === 'clave-temporal') {
-      if (!confirm(`¿Generar una clave temporal para ${b.dataset.nombre}? Se cerrará su sesión y la clave anterior dejará de servir.`)) return;
+      if (!confirmar(`¿Generar una clave temporal para ${b.dataset.nombre}? Se cerrará su sesión y la clave anterior dejará de servir.`)) return;
       const r = await api('POST', `/api/admin/usuarios/${id}/clave-temporal`);
-      prompt(`Clave temporal para ${r.email}. Cópiala y envíala por un canal seguro: no se vuelve a mostrar.`, r.clave); return;
+      pedir(`Clave temporal para ${r.email}. Cópiala y envíala por un canal seguro: no se vuelve a mostrar.`, r.clave); return;
     }
-    if (accion === 'borrar-resena' && confirm('¿Eliminar esta reseña?')) { await api('DELETE', `/api/admin/resenas/${id}`); avisar('Reseña eliminada'); await enrutar(); return; }
+    if (accion === 'borrar-resena' && confirmar('¿Eliminar esta reseña?')) { await api('DELETE', `/api/admin/resenas/${id}`); avisar('Reseña eliminada'); await enrutar(); return; }
     if (accion === 'aprobar') { await api('PUT', `/api/admin/verificaciones/${id}`, { estado: 'verificado' }); avisar('Mentor verificado'); await enrutar(); }
     if (accion === 'rechazar') {
-      const nota = prompt('Motivo del rechazo (el mentor lo verá):');
+      const nota = pedir('Motivo del rechazo (el mentor lo verá):');
       if (!nota) return;
       await api('PUT', `/api/admin/verificaciones/${id}`, { estado: 'rechazado', nota }); avisar('Verificación rechazada'); await enrutar();
     }
@@ -1097,5 +1109,13 @@ window.addEventListener('hashchange', async () => {
   } catch { /* se mostrará el error en la vista */ }
   const pie = document.getElementById('pie-soporte');
   if (pie && catalogo.soporte) pie.textContent = `Soporte: ${catalogo.soporte}`;
+  document.documentElement.lang = idioma === 'en' ? 'en' : 'es-CO';
+  if (EN_ACTIVO) {
+    document.title = tr(document.title);
+    const meta = document.querySelector('meta[name=description]');
+    if (meta) meta.content = 'Connect with teachers and students across Colombia. Online and in-person classes.';
+    traducirDom(document.querySelector('header'));
+    traducirDom(document.querySelector('footer'));
+  }
   enrutar();
 })();

@@ -1,4 +1,4 @@
-/* Artia — Midnight Purple #432C7A + Golden Marigold #FFC72C. Outfit (títulos) + Plus Jakarta Sans (texto); Playfair Display solo en el logotipo. */
+/* Artia — Midnight Purple #432C7A + Golden Marigold #FFC72C. Plus Jakarta Sans (títulos y texto); Playfair Display solo en el logotipo. */
 :root{
   --morado:#432C7A;--morado-hover:#35225f;--morado-suave:#ece8f5;
   --amarillo:#FFC72C;--amarillo-hover:#f5b800;
@@ -6,13 +6,13 @@
   --tinta:#1C1524;--suave:#6E667A;--borde:#e8e4ee;
   --error:#a3122a;--r:16px;
   --serif:"Playfair Display",Georgia,"Times New Roman",serif;
-  --titulos:"Outfit","Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --titulos:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --sans:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--fondo);color:var(--tinta);font:16px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
 a{color:var(--morado)}
-h1,h2,h3{font-family:var(--titulos);font-weight:700;line-height:1.15;letter-spacing:-.015em;margin:0 0 .5rem}
+h1,h2,h3{font-family:var(--titulos);font-weight:800;line-height:1.18;letter-spacing:-.02em;margin:0 0 .5rem}
 h1{font-size:2rem}h2{font-size:1.5rem}h3{font-size:1.2rem}
 
 /* Navegación */
@@ -242,3 +242,6 @@ nav a.btn.activar{font-weight:700;color:var(--tinta);margin-left:auto;white-spac
 .cta-final .btn{background:var(--amarillo);color:var(--tinta);padding:1rem 2.4rem;font-size:1.1rem;font-weight:700}
 .cta-final .btn:hover{background:var(--amarillo-hover)}
 @media(max-width:720px){.cta-final .btn{display:block}}
+
+nav button.idioma{border:1px solid var(--borde);border-radius:999px;padding:.3rem .8rem;font-size:.85rem;font-weight:600;color:var(--morado);background:#fff}
+nav button.idioma:hover{border-color:var(--morado)}

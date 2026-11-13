@@ -148,8 +148,14 @@ async function vistaInicio() {
         <span class="cat-materias">${c.materias.slice(0, 4).map((m) => html`<span class="etiqueta">${m}</span>`)}</span>
         <span class="cat-ver">Ver disponibilidad</span>
       </a>`)}</div>
-    <h2 style="margin-top:2rem">Clases destacadas</h2>
-    ${clases.length ? html`<div class="rejilla">${clases.slice(0, 6).map(tarjetaClase)}</div>` : html`<p class="vacio">Aún no hay clases publicadas. ¡Sé el primero!</p>`}`);
+    <h2 style="margin-top:3.5rem">Clases destacadas</h2>
+    ${clases.length ? html`<div class="rejilla">${clases.slice(0, 6).map(tarjetaClase)}</div>` : html`<p class="vacio">Aún no hay clases publicadas. ¡Sé el primero!</p>`}
+    ${!yo || (yo.rol === 'estudiante' && !yo.suscripcion.activa) ? html`
+    <section class="cta-final" aria-labelledby="cta-t">
+      <h2 id="cta-t">¿Te sumas a ser más feliz?</h2>
+      <p>Suscríbete a nuestra plataforma y empieza a aprender hoy con mentores verificados.</p>
+      <a class="btn" href="${yo ? '#/suscripcion' : '#/registro?rol=estudiante'}">Suscríbete ahora</a>
+    </section>` : ''}`);
 }
 
 async function vistaClases(params) {

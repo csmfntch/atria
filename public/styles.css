@@ -1,4 +1,4 @@
-/* Artia — Midnight Purple #432C7A + Golden Marigold #FFC72C. Playfair Display + Plus Jakarta Sans. */
+/* Artia — Midnight Purple #432C7A + Golden Marigold #FFC72C. Outfit (títulos) + Plus Jakarta Sans (texto); Playfair Display solo en el logotipo. */
 :root{
   --morado:#432C7A;--morado-hover:#35225f;--morado-suave:#ece8f5;
   --amarillo:#FFC72C;--amarillo-hover:#f5b800;
@@ -6,12 +6,13 @@
   --tinta:#1C1524;--suave:#6E667A;--borde:#e8e4ee;
   --error:#a3122a;--r:16px;
   --serif:"Playfair Display",Georgia,"Times New Roman",serif;
+  --titulos:"Outfit","Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --sans:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--fondo);color:var(--tinta);font:16px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
 a{color:var(--morado)}
-h1,h2,h3{font-family:var(--serif);font-weight:700;line-height:1.2;margin:0 0 .5rem}
+h1,h2,h3{font-family:var(--titulos);font-weight:700;line-height:1.15;letter-spacing:-.015em;margin:0 0 .5rem}
 h1{font-size:2rem}h2{font-size:1.5rem}h3{font-size:1.2rem}
 
 /* Navegación */
@@ -29,7 +30,8 @@ main{max-width:1080px;margin:0 auto;padding:1.5rem 1.5rem 3rem;outline:none}
 /* Portada */
 .hero{padding:3rem 0 3.5rem;max-width:640px}
 .hero h1{font-size:clamp(2.6rem,8vw,4.5rem);line-height:1.08;color:var(--morado);margin-bottom:1.25rem}
-.hero h1 em{color:var(--tinta);font-style:italic}
+.hero h1{font-weight:800;letter-spacing:-.03em}
+.hero h1 em{color:var(--tinta);font-style:normal;background:linear-gradient(transparent 68%,var(--amarillo) 68%,var(--amarillo) 92%,transparent 92%)}
 .hero p{font-size:1.2rem;font-weight:500;color:var(--suave);line-height:1.65;margin:0 0 2rem}
 .hero .acciones{display:flex;flex-wrap:wrap;gap:1rem}
 .hero .btn{padding:.9rem 2rem;font-size:1.05rem}
@@ -115,7 +117,7 @@ label.opcion input{width:auto;margin-top:.3rem}
 .bloque{display:flex;flex-wrap:wrap;gap:.6rem;align-items:flex-end;margin-bottom:.5rem}
 .bloque label{flex:1;min-width:120px}
 
-.dia-titulo{font-family:var(--serif);color:var(--morado);margin:1.2rem 0 .6rem;font-size:1.1rem}
+.dia-titulo{font-family:var(--titulos);color:var(--morado);margin:1.2rem 0 .6rem;font-size:1.1rem}
 .reserva{display:grid;grid-template-columns:110px 1fr;gap:1rem}
 .reserva .hora{display:grid;align-content:start;gap:.1rem;border-right:2px solid var(--amarillo);padding-right:.8rem}
 .reserva h3{margin:.3rem 0}
@@ -123,7 +125,7 @@ label.opcion input{width:auto;margin-top:.3rem}
 @media (max-width:560px){.reserva{grid-template-columns:1fr}.reserva .hora{border-right:0;border-bottom:2px solid var(--amarillo);padding:0 0 .5rem;display:flex;gap:.5rem;align-items:baseline}}
 
 .plan{max-width:520px}
-.precio-plan{font-family:var(--serif);font-size:2.2rem;font-weight:700;color:var(--morado);margin:.2rem 0 .8rem}
+.precio-plan{font-family:var(--titulos);font-size:2.2rem;font-weight:700;color:var(--morado);margin:.2rem 0 .8rem}
 .beneficios{padding-left:1.2rem;margin:0 0 1rem}
 .beneficios li{margin:.25rem 0}
 .tabla{width:100%;border-collapse:collapse}
@@ -139,7 +141,7 @@ input[type=radio],input[type=checkbox]{accent-color:var(--morado)}
 /* ---------- Marketplace: categorías y filtros ---------- */
 .mision{background:var(--morado);color:#fff;border-radius:calc(var(--r) + 6px);padding:2.5rem 2rem;margin:0 0 3rem}
 .mision-meta{margin:0 0 .75rem;color:var(--amarillo);font-weight:600;letter-spacing:.04em;font-size:.95rem}
-.mision-meta b{font-family:var(--serif);font-size:1.15em}
+.mision-meta b{font-family:var(--titulos);font-size:1.15em}
 .mision h2{color:#fff;font-size:clamp(1.6rem,4.5vw,2.4rem);max-width:22ch;margin:0 0 1.75rem}
 .mision-cols{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
 .mision-cols article{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:var(--r);padding:1.25rem}
@@ -233,3 +235,10 @@ fieldset.materias{display:grid;gap:.8rem}
 
 nav a.btn.activar{font-weight:700;color:var(--tinta);margin-left:auto;white-space:nowrap}
 @media(max-width:720px){nav a.btn.activar{margin-left:0}}
+
+.cta-final{margin:3.5rem 0 1rem;text-align:center;padding:3rem 1.5rem;border-radius:calc(var(--r) + 6px);background:linear-gradient(135deg,var(--morado),#5b3fa0);color:#fff;box-shadow:0 14px 36px rgba(67,44,122,.25)}
+.cta-final h2{color:#fff;font-size:clamp(1.8rem,5vw,2.6rem);margin:0 0 .6rem}
+.cta-final p{margin:0 auto 1.6rem;max-width:44ch;font-size:1.1rem;color:#efe9fb}
+.cta-final .btn{background:var(--amarillo);color:var(--tinta);padding:1rem 2.4rem;font-size:1.1rem;font-weight:700}
+.cta-final .btn:hover{background:var(--amarillo-hover)}
+@media(max-width:720px){.cta-final .btn{display:block}}

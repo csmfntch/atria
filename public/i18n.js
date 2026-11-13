@@ -207,7 +207,7 @@ const EN = {
   'Los documentos legales están en español; en caso de diferencia, prevalece la versión en español.': 'Legal documents are in Spanish; in case of any difference, the Spanish version prevails.',
 
   // --- pie de página y meta ---
-  'ARTIA · El arte de aprender': 'ARTIA · The art of learning',
+  'Artia · El arte de aprender': 'Artia · The art of learning',
   'Precios en pesos colombianos (COP) · Las clases se pagan de forma segura a través de Artia.': 'Prices in Colombian pesos (COP) · Classes are paid securely through Artia.',
   'Artia — el arte de aprender': 'Artia — the art of learning',
 

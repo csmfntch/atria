@@ -18,7 +18,9 @@ h1{font-size:2rem}h2{font-size:1.5rem}h3{font-size:1.2rem}
 /* Navegación */
 .barra{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;justify-content:space-between;padding:.9rem 1.5rem;background:#fff;box-shadow:0 1px 2px rgba(28,21,36,.08);position:sticky;top:0;z-index:5}
 .logo{display:flex;align-items:center;gap:.6rem;text-decoration:none}
-.marca{font-family:var(--serif);font-weight:700;font-size:1.9rem;letter-spacing:-.01em;color:var(--morado);line-height:1}
+.marca{font-family:var(--titulos);font-weight:700;font-size:2rem;letter-spacing:-.025em;color:var(--morado);line-height:1}
+.marca .i{position:relative;display:inline-block}
+.marca .i::after{content:"";position:absolute;left:50%;top:.14em;width:.19em;height:.19em;border-radius:50%;background:var(--amarillo);transform:translateX(-50%)}
 nav{display:flex;flex-wrap:wrap;gap:.35rem 1rem;align-items:center}
 nav a,nav button{padding:.4rem .2rem;text-decoration:none;color:var(--suave);border:0;background:none;font:inherit;font-weight:500;cursor:pointer;transition:color .15s}
 nav a:hover,nav button:hover{color:var(--morado)}
@@ -77,7 +79,7 @@ textarea{min-height:90px;resize:vertical}
 #aviso{position:fixed;left:50%;bottom:1rem;transform:translateX(-50%);background:var(--tinta);color:#fff;padding:.6rem 1.1rem;border-radius:999px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
 #aviso.ver{opacity:1}
 .pie{text-align:center;color:var(--suave);font-size:.85rem;padding:2rem 1rem;border-top:1px solid var(--borde);display:grid;gap:.35rem;justify-items:center}
-.marca-pie{font-family:var(--serif);letter-spacing:.14em;color:var(--morado);font-weight:700}
+.marca-pie{font-family:var(--titulos);letter-spacing:-.01em;color:var(--morado);font-weight:700}
 
 /* ---------- Componentes de cuenta, agenda, suscripción ---------- */
 [hidden]{display:none !important}

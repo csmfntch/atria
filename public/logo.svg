@@ -1,6 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" fill="none" stroke-linejoin="miter">
-  <rect x="5" y="5" width="30" height="30" stroke="#432C7A" stroke-width="1.8"/>
-  <path d="M20 5 35 20 20 35 5 20Z" stroke="#432C7A" stroke-width="1.8"/>
-  <path d="M20 5V35M5 20H35" stroke="#432C7A" stroke-width="1"/>
-  <path d="M20 12.5 27.5 20 20 27.5 12.5 20Z" stroke="#FFC72C" stroke-width="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Artia">
+  <defs>
+    <linearGradient id="n" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4C3A98"/><stop offset="1" stop-color="#2E2070"/></linearGradient>
+    <linearGradient id="o" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD255"/><stop offset="1" stop-color="#E5A21D"/></linearGradient>
+    <mask id="m" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <rect width="100" height="100" fill="#fff"/>
+      <path d="M50 1.3 98.7 50 50 98.7 1.3 50Z" fill="#000" stroke="#000" stroke-width="7" stroke-linejoin="miter"/>
+    </mask>
+  </defs>
+  <!-- marco cuadrado: mitad morada, mitad dorada -->
+  <g mask="url(#m)">
+    <path fill="url(#n)" d="M8 8h30v9.7H17.7v64.6H38V92H8Z"/>
+    <path fill="url(#o)" d="M92 8H60v9.7h22.3v64.6H60V92h32Z"/>
+  </g>
+  <!-- rombo morado -->
+  <path fill="url(#n)" fill-rule="evenodd" d="M50 1.3 98.7 50 50 98.7 1.3 50Z M50 12.2 12.2 50 50 87.8 87.8 50Z"/>
+  <!-- estrella dorada con centro vacío -->
+  <path fill="url(#o)" fill-rule="evenodd" d="M50 14Q57.8 42.2 86 50Q57.8 57.8 50 86Q42.2 57.8 14 50Q42.2 42.2 50 14Z M50 32.5 32.5 50 50 67.5 67.5 50Z"/>
 </svg>

@@ -137,6 +137,26 @@ input[type=radio],input[type=checkbox]{accent-color:var(--morado)}
 #error:empty{display:none}
 
 /* ---------- Marketplace: categorías y filtros ---------- */
+.mision{background:var(--morado);color:#fff;border-radius:calc(var(--r) + 6px);padding:2.5rem 2rem;margin:0 0 3rem}
+.mision-meta{margin:0 0 .75rem;color:var(--amarillo);font-weight:600;letter-spacing:.04em;font-size:.95rem}
+.mision-meta b{font-family:var(--serif);font-size:1.15em}
+.mision h2{color:#fff;font-size:clamp(1.6rem,4.5vw,2.4rem);max-width:22ch;margin:0 0 1.75rem}
+.mision-cols{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.mision-cols article{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.18);border-radius:var(--r);padding:1.25rem}
+.mision-cols h3{color:var(--amarillo);font-size:1.05rem;margin:0 0 .4rem}
+.mision-cols p{margin:0;line-height:1.65;color:#f1edf9}
+.sub-seccion{margin:-.25rem 0 1.25rem}
+.categorias-pro{display:grid;gap:1rem;grid-template-columns:repeat(auto-fill,minmax(270px,1fr))}
+.cat-tarjeta{display:flex;flex-direction:column;gap:.45rem;padding:1.35rem;background:#fff;border:1px solid var(--borde);border-radius:var(--r);text-decoration:none;color:var(--tinta);transition:box-shadow .15s,transform .15s,border-color .15s}
+.cat-tarjeta:hover{box-shadow:0 10px 28px rgba(67,44,122,.14);transform:translateY(-3px);border-color:var(--morado)}
+.cat-icono{display:grid;place-items:center;width:3rem;height:3rem;border-radius:50%;background:var(--morado-suave);font-size:1.5rem;margin-bottom:.25rem}
+.cat-tarjeta h3{margin:0;color:var(--morado)}
+.cat-tarjeta p{margin:0;font-size:.92rem;line-height:1.55;color:var(--suave)}
+.cat-tarjeta p b{display:block;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--tinta)}
+.cat-tarjeta p:nth-of-type(2) b{color:#9a6b00}
+.cat-materias{display:flex;flex-wrap:wrap;gap:.35rem;margin-top:.35rem}
+.cat-ver{margin-top:auto;padding-top:.5rem;font-weight:700;color:var(--morado);font-size:.9rem}
+@media(max-width:720px){.mision{padding:1.75rem 1.25rem}}
 .categorias{display:grid;gap:.8rem;grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
 .categoria{display:grid;gap:.2rem;padding:1rem;background:#fff;border:1px solid var(--borde);border-radius:var(--r);text-decoration:none;color:var(--tinta);transition:box-shadow .15s,transform .15s}
 .categoria:hover{box-shadow:0 8px 24px rgba(67,44,122,.12);transform:translateY(-2px)}

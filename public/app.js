@@ -129,8 +129,25 @@ async function vistaInicio() {
           : html`<a class="btn sec" href="#/registro?rol=profesor">Conviértete en mentor</a>`}
       </div>
     </section>
-    <h2>Explora por categoría</h2>
-    <div class="categorias">${catalogo.categorias.map((c) => html`<a class="categoria" href="#/clases?categoria=${encodeURIComponent(c.nombre)}"><span class="icono" aria-hidden="true">${ICONOS[c.nombre] ?? '✨'}</span><b>${c.nombre}</b><span class="suave">${c.materias.slice(0, 3).join(', ')}${c.materias.length > 3 ? '…' : ''}</span></a>`)}</div>
+    <section class="mision" aria-labelledby="mision-t">
+      <p class="mision-meta"><b>10.000.000</b> personas más felices · <b>2030</b></p>
+      <h2 id="mision-t">Conectamos metas y pasiones en un solo lugar.</h2>
+      <div class="mision-cols">
+        <article><h3>Nuestra misión</h3><p>Hacer más felices a 10 millones de personas para 2030, conectándolas con quienes pueden guiarlas para que alcancen sus metas y sueños.</p></article>
+        <article><h3>Nuestra visión</h3><p>Ser el lugar de Latinoamérica donde cualquiera encuentra a quien le enseñe lo que sueña aprender, y donde cada pasión compartida se convierte en una oportunidad.</p></article>
+      </div>
+    </section>
+    <h2>Aprende algo nuevo y llévate más que una clase</h2>
+    <p class="suave sub-seccion">Cada categoría trae mentores verificados. Elige la que más te llame y empieza hoy.</p>
+    <div class="categorias-pro">${catalogo.categorias.map((c) => html`
+      <a class="cat-tarjeta" href="#/clases?categoria=${encodeURIComponent(c.nombre)}">
+        <span class="cat-icono" aria-hidden="true">${ICONOS[c.nombre] ?? '✨'}</span>
+        <h3>${c.nombre}</h3>
+        <p><b>Aprenderás</b> ${c.aprenderas}</p>
+        <p><b>Te llevas</b> ${c.ganas}</p>
+        <span class="cat-materias">${c.materias.slice(0, 4).map((m) => html`<span class="etiqueta">${m}</span>`)}</span>
+        <span class="cat-ver">Ver clases →</span>
+      </a>`)}</div>
     <h2 style="margin-top:2rem">Clases destacadas</h2>
     ${clases.length ? html`<div class="rejilla">${clases.slice(0, 6).map(tarjetaClase)}</div>` : html`<p class="vacio">Aún no hay clases publicadas. ¡Sé el primero!</p>`}`);
 }

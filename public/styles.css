@@ -247,3 +247,6 @@ nav a.btn.activar{font-weight:700;color:var(--tinta);margin-left:auto;white-spac
 
 nav button.idioma{border:1px solid var(--borde);border-radius:999px;padding:.3rem .8rem;font-size:.85rem;font-weight:600;color:var(--morado);background:#fff}
 nav button.idioma:hover{border-color:var(--morado)}
+
+.logo img{height:44px;width:auto;display:block}
+@media(max-width:720px){.logo img{height:38px}}

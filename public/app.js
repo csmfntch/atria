@@ -137,7 +137,7 @@ async function vistaInicio() {
         <article><h3>Nuestra visión</h3><p>Ser el lugar de Latinoamérica donde cualquiera encuentra a quien le enseñe lo que sueña aprender, y donde cada pasión compartida se convierte en una oportunidad.</p></article>
       </div>
     </section>
-    <h2>Aprende algo nuevo y llévate más que una clase</h2>
+    <h2 class="titulo-seccion">¿Qué puedes aprender hoy?</h2>
     <p class="suave sub-seccion">Cada categoría trae mentores verificados. Elige la que más te llame y empieza hoy.</p>
     <div class="categorias-pro">${catalogo.categorias.map((c) => html`
       <a class="cat-tarjeta" href="#/clases?categoria=${encodeURIComponent(c.nombre)}">
@@ -146,7 +146,7 @@ async function vistaInicio() {
         <p><b>Aprenderás</b> ${c.aprenderas}</p>
         <p><b>Te llevas</b> ${c.ganas}</p>
         <span class="cat-materias">${c.materias.slice(0, 4).map((m) => html`<span class="etiqueta">${m}</span>`)}</span>
-        <span class="cat-ver">Ver clases →</span>
+        <span class="cat-ver">Ver disponibilidad</span>
       </a>`)}</div>
     <h2 style="margin-top:2rem">Clases destacadas</h2>
     ${clases.length ? html`<div class="rejilla">${clases.slice(0, 6).map(tarjetaClase)}</div>` : html`<p class="vacio">Aún no hay clases publicadas. ¡Sé el primero!</p>`}`);
